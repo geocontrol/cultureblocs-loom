@@ -1,0 +1,30 @@
+# --- runtime data: never commit beads, blobs or vault ciphertext ---
+data/*
+!data/.gitkeep
+
+# --- capture queues (offline buffers, may contain unpushed beads) ---
+queue.jsonl
+*.queue.json
+
+# --- node ---
+node_modules/
+dist/
+.cache/
+
+# --- python (connector runners) ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# --- editors & os ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# --- local env/config ---
+.env
+.env.*
+docker-compose.override.yml

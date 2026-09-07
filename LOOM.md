@@ -1,0 +1,495 @@
+# Loom — one interface for the string
+
+*A local-first app where the whole loop lives in one place: what the
+machines propose, what you mint, what you write, what you publish.
+Named for the frame that holds the threads while you work them —
+the beads are already there; the loom is where they become cloth.*
+
+Status: **design, not built.** Nothing here is committed to yet. This
+document is the argument and the plan; it names what changes in the
+String, what stays, and what it deliberately does not do.
+
+Three decisions taken up front, which everything below follows from:
+
+1. **The String becomes a personal sync server.** Loom's canonical data
+   is local. The String stops being the source of truth and becomes an
+   optional, user-owned sync-and-publish backend, discovered from your
+   own repository. Loom works completely with no String at all.
+2. **Credentials sync across devices**, encrypted with a key the String
+   never sees — with one honest exception, named in §5.
+3. **Nothing is retired.** Timeline, Studio, Pocket and Easel keep
+   running. Loom is built alongside; daily use decides the rest.
+
+---
+
+## 1 · Where this comes from
+
+Two lineages meet here.
+
+**The String's own.** The three principles in the README —
+local-first, own your data, privacy by default — are already enforced
+by architecture. The wire format is already the federation format.
+Records are already lexicon-validated and already stored under their
+NSID. Very little of what follows is new philosophy; most of it is
+finishing what the String started.
+
+**Groundmist** ([groundmist.xyz](https://groundmist.xyz/), the three
+essays by grjte) contributes the part the String has not done, which is
+to say what the *client* is allowed to assume:
+
+- **Distribution layer.** Data stays private and local; ATProto login
+  exists *only* to publish. This is exactly the String's Stage F, and
+  exactly Pocket's OAuth path — already the house pattern.
+- **Legibility layer.** Lexicons are the shared understanding, and they
+  apply to *private* data too, not just published records. Interfaces
+  can then be produced independently of servers: an AppView needs the
+  data and the schema, never your rendering code.
+- **Interoperability.** The move from an *app-specific* sync server —
+  every user of one app on one box — to a **personal sync server**: one
+  person's data from many apps converging in a store they own, keyed by
+  lexicon path, authorised by their own DID.
+
+Groundmist's prototype syncs Automerge documents into lexicon-named
+directories, authenticating against the user's PDS and discovering the
+sync server from it. The String is most of that already. It has the
+lexicons, the NSID-keyed store, the append-only change feed, the
+publish pipeline. What it lacks is: sync in the other direction, an
+identity-derived authorisation model, a discovery record, and any
+client that can survive without it.
+
+Loom is that client. Making it means finishing the String into a PSS.
+
+---
+
+## 2 · Review of what exists (and what Loom must fix)
+
+Read honestly, because these are the constraints the design has to
+answer, not a complaint about work that has served well.
+
+*Every file path in this section is in the sibling repository,
+[`cultureblocs-string`](https://github.com/geocontrol/cultureblocs-string).*
+
+**Good, and to be kept**
+
+- `string/app/lexicon.py` — a real validator, small, understandable.
+- `/changes` with a cursor — the sync substrate is already there, and
+  was clearly built with this in mind ("the upgrade path to CRDT/PDS
+  promotion later").
+- `publisher.py`'s strip rules — geo, provenance, media, device ids
+  never leave. This is the most important code in the repository.
+- Easel — already the shape Loom needs: IndexedDB, content-addressed
+  blobs, drift against `publishedCanonical`, OAuth with a
+  non-extractable DPoP key. Loom is Easel's architecture applied to
+  beads and strands. `easel/oauth.js`, `easel/lib/store.js`,
+  `easel/lib/rkey.js` and `easel/lib/image.js` port almost unchanged.
+
+**Problems Loom's design has to answer**
+
+| | Where | What |
+|---|---|---|
+| R1 | `db.py: upsert` | Existing `dedupeKey` returns `duplicate` and writes nothing. Correct for mint facts; wrong for connector proposals, which cannot be corrected on a re-run. Loom needs *revisable proposals* and *immutable mints* to be different things. |
+| R2 | `db.py: identities` | App passwords sit in plaintext SQLite. The README says so honestly. A synced credential store must not repeat this. |
+| R3 | `main.py: auth` | `STRING_TOKEN` is one shared bearer for the entire surface. Any client holding it — a browser tab, a phone, a cron worker — can read every record and rewrite every identity. There is no scoping and no revocation short of rotating everything. |
+| R4 | `main.py` CORS | `allow_origins=["*"]`. With a token set this is survivable; with the token unset ("home lab mode") any page you happen to visit can read and write `localhost:8100`. |
+| R5 | `publisher.py` + `easel/lib/publish.js` | Two independent implementations of the strip. They agree today. Nothing enforces that they keep agreeing, and the failure mode is publishing something that should never have left. |
+| R6 | `db.py: patch` | Shallow merge, last-writer-wins, no revision precondition. Two tabs — never mind two devices — silently lose each other's edits. |
+| R7 | `timeline: isMachine` | `MACHINE_APPS` is a hardcoded array in the page. Every new connector means editing the UI to keep the dotted rail honest. |
+| R8 | validation | Lives only on the server. A client that cannot validate offline is not local-first; it is a form that posts to an API. |
+| R9 | `changes` | One-directional, and each row stores a full body. It grows without bound and carries no actor or device, so bidirectional sync would echo a device's own writes back at it. |
+
+R3, R8 and R9 are the ones that actually block a local-first client.
+The rest are worth fixing on the way past.
+
+---
+
+## 3 · The shape of Loom
+
+One responsive page, one codebase, six surfaces. Vanilla ES modules and
+IndexedDB, in the manner of Easel and Pocket — no framework, no build
+step, served as static files (`:8105` in compose; deployable to
+cultureblocs.com like Pocket, because the OAuth client id must be a
+stable URL).
+
+    ┌ Thread ────────── the day, the month; beads, strands, proposals
+    ├ Mint ──────────── the button: a bead in two taps
+    ├ Compose ───────── the full entry: narrative, place, items, photos
+    ├ Feeds ─────────── connectors, their last run, their proposals
+    ├ Vault ─────────── identities, connector credentials, devices
+    └ Publish ───────── what is public, what has drifted, what to send
+
+**Posture, not two apps.** The ROADMAP is explicit that the phone is
+"a button, not a feed" and that the telling stays a desk ritual. One
+interface and that principle are in tension, and the tension is real —
+so resolve it with a **posture** rather than a second codebase. On a
+narrow viewport Loom opens in *totem posture*: Mint is the whole
+screen, the mask strip and the dot-matrix bloom exactly as Pocket does
+it. Thread is reachable, but by a deliberate gesture, never as the
+landing surface. On a wide viewport Loom opens in *desk posture*:
+Thread centre, Feeds and Publish in rails. Posture is a setting, so the
+principle is a default and not a cage.
+
+This is a deliberate softening of "no timeline on the phone". Worth
+knowing that is what it is.
+
+### Two ways in, one mint fact
+
+**Quick bead.** Mask, optional line, press. Written to IndexedDB before
+anything else happens; no network on the critical path. `provenance.app
+= "loom"`, `provenance.mintedAt` = the press. This is a *mint fact* and
+is never rewritten by a machine.
+
+**Full entry.** A `com.cultureblocs.strand` composed as a diary page:
+title, `narrative` (10 000 graphemes — the field already exists and is
+unused by the timeline), place, links, photos, and the day's beads
+attached as `items`. Proposals for that day sit alongside, one press
+from being kept and included.
+
+**Growing one into the other.** A bead minted at 21:04 can be grown
+into an entry at breakfast. The bead does not change — the strand wraps
+it. The mint fact stays sacred; the telling accretes around it. This is
+the single most important interaction in the app and should be one
+button on a bead: *tell this*.
+
+---
+
+## 4 · Data model: local-first, lexicon-legible
+
+### The local store
+
+IndexedDB, one `records` store, keyed by NSID path — the same shape the
+PSS will hold, so sync is a copy rather than a translation:
+
+    key    com.cultureblocs.bead/3lqk2m4x7c22p
+    value  { type, rkey, body, dedupeKey,
+             createdAt, updatedAt, hlc, deviceId,
+             state, origin,
+             publishedUri, publishedCanonical }
+
+- **`rkey` from birth.** A TID assigned locally at mint (`easel/lib/
+  rkey.js` already does this), used as the record id everywhere. Publish
+  then writes under the id the record already had, and `publisher.py`'s
+  `_rkey_for` fallback dance becomes unnecessary for anything Loom made.
+- **`state`** ∈ `proposal | kept | draft | published | edited`. Explicit,
+  stored, synced — which retires R7. The dotted rail renders `proposal`,
+  not a hardcoded list of app names.
+- **`origin`** ∈ `mint | connector:<id> | import | totem`. Provenance for
+  the UI; `body.provenance` remains the record's own, and still never
+  publishes.
+- **Blobs** content-addressed by SHA-256 in a second store, exactly as
+  Easel does, with the same orphan sweep.
+
+### Legibility: the validator moves to the client
+
+Port `string/app/lexicon.py` to `loom/lib/lexicon.js` and ship the
+`com.cultureblocs.*` and `community.lexicon.*` JSON alongside the app.
+Validation then happens at the point of writing, offline, before
+anything is queued. The String revalidates on receipt — it must, since
+it accepts writes from workers too — but Loom never depends on a server
+to know whether a record is well-formed.
+
+This is the legibility argument taken literally: the schema travels
+with the app, so an AppView (or a second client, or an agent) needs the
+data and the lexicon and nothing else.
+
+*Test seam:* the same fixture set runs against `lexicon.py` under
+pytest and `lexicon.js` under `node --test`, so the two validators
+cannot drift. Same trick for the strip (R5): one JSON fixture file of
+`{ input, expectedPublic }` pairs, asserted by both languages. If a
+field is ever added to a lexicon and not to the strip, a test fails
+rather than a coordinate leaks.
+
+### Conflicts: HLC and last-writer-wins per field, with a shadow
+
+Groundmist syncs Automerge documents. Loom should not, at least not
+yet, and the reason is worth stating: this is a single-person diary
+whose records are overwhelmingly append-only. The one place a CRDT
+genuinely earns its weight is concurrent editing of a long text field —
+`strand.narrative` — from two devices, which is a corner rather than
+the common case.
+
+So: **field-level last-writer-wins, ordered by a hybrid logical clock**
+(`hlc` = `<physical ms>.<counter>.<deviceId>`), which is a few dozen
+lines and no wasm. When two devices did write the same field
+concurrently, the loser is *not* discarded — it is kept as a conflict
+shadow on the record and the UI says so, with both versions offered.
+Silent loss is the thing to avoid; a merge algorithm is not the only way
+to avoid it.
+
+The upgrade path stays open: `narrative` and `note` can later become
+Automerge text documents stored beside the record, synced as binary
+blobs through the same channel, without touching the envelope. Do it if
+and when two-device editing actually hurts.
+
+---
+
+## 5 · Sync: the String as a personal sync server
+
+Four changes to the String. None of them break the existing API, so
+timeline, Studio, Pocket and the workers keep working throughout.
+
+### 5.1 Discovery — no more typing a URL and a token
+
+Publish one record to your own repository:
+
+    com.cultureblocs.sync.server
+      { endpoint: "https://brick.tailnet.ts.net", createdAt }
+
+Loom, after ATProto sign-in, resolves your DID, reads that record, and
+finds your String. Pointing a new device at your own data becomes:
+sign in. This is Groundmist's discovery move, and it is the single
+biggest daily-friction win in the whole design — the timeline's URL and
+token boxes are the current answer, and they are why a second device is
+a chore.
+
+If the record is absent, Loom is simply a local app. That is a
+supported, complete configuration, not a degraded one.
+
+### 5.2 Authorisation — DID-scoped, NSID-scoped grants
+
+Retire the shared bearer for interactive clients (R3):
+
+- Loom obtains a **service-auth JWT** from your PDS
+  (`com.atproto.server.getServiceAuth`, audience = the String's DID or
+  configured identifier) and presents it. The String verifies the
+  signature against the DID document. No shared secret ever reaches a
+  browser.
+- A **grants** table gives every non-interactive actor a scope:
+
+      name       scrobbler
+      subject    key:<hash>            # or a DID
+      paths      com.cultureblocs.bead
+      ops        write,propose
+      expires    2027-01-01
+
+  A connector that can propose listen beads cannot read your
+  identities, cannot read your notes, and can be revoked by itself.
+  This is the capability model the PSS essay describes, made concrete
+  by the fact that our storage keys are already NSIDs.
+- `STRING_TOKEN` remains for the transition and for workers that have
+  not been migrated. CORS narrows to configured origins (R4).
+
+### 5.3 Sync — the change feed learns to go both ways
+
+`GET /changes` already gives a cursor. Add:
+
+- `POST /changes` — a batch of ops `{ path, hlc, deviceId, op, body }`,
+  applied with the same HLC rule the client uses, returning the server's
+  cursor. Idempotent on `(path, hlc)`.
+- `GET /sync` (WebSocket) — the same thing live: send a cursor, receive
+  ops, push ops. Falls back to polling `/changes` where sockets are
+  awkward.
+- `changes` gains `device_id`, `actor` and `hlc` columns, so a device
+  filters its own echo (R9), and a compaction job collapses superseded
+  update rows for a record beyond a retention window.
+- `patch` takes an optional `If-Match: <hlc>` precondition (R6).
+
+Records the connector framework produces arrive with `state:
+"proposal"`, which is revisable on re-run — R1 — while anything with
+`origin: "mint"` keeps today's insert-once behaviour. The mint fact
+stays immutable because it is *declared* so, not because the store
+cannot express an update.
+
+### 5.4 What does not change
+
+The String stays FastAPI and SQLite WAL on your own hardware
+(`HOST-SPEC.md` is unaffected — the DataBrick is the natural home for a
+personal sync server, and this design makes that framing literal). The
+AppView stays an index of *public* references only. Publishing stays a
+deliberate act with the same strip.
+
+---
+
+## 6 · The vault: credentials that sync
+
+The answer to "sync tokens", and the fix for R2. The distinction that
+makes it honest is **who has to be able to read the secret**.
+
+**Device credentials — end-to-end encrypted; the String stores
+ciphertext and can never read it.** Your ATProto OAuth session, and any
+connector Loom can run in the browser.
+
+- A vault key derived from a passphrase (PBKDF2-HMAC-SHA256 via
+  WebCrypto, or Argon2id in wasm if we take the dependency), never
+  transmitted.
+- Records under `com.cultureblocs.vault.item`, body
+  `{ label, kind, createdAt, cipher: { alg, iv, ct } }`. The *schema* is
+  public and published like every other lexicon; the *payload* is
+  opaque bytes.
+- A second device: sign in, enter the passphrase, and the connectors
+  and identities are there. This is the whole feature.
+- The DPoP private key stays non-extractable per device and is never
+  vaulted — a session is re-established per device by design.
+
+**Host credentials — plaintext to your own machine, sealed at rest.**
+A Last.fm API key, an IMAP password, anything a server-side connector
+must present while your laptop is shut. These *cannot* be end-to-end
+encrypted; a server that must use a secret must be able to read it.
+
+- Loom decrypts locally and *releases* the credential to the String in a
+  deliberate, labelled step — the same grammar as publishing a strand.
+- The String seals it at rest under a host key held outside the
+  database (file with `0600`, or the OS keyring), so a stolen backup is
+  not a stolen credential. This also retires R2 for the existing
+  `identities` table, which should move behind the same seal.
+- The UI marks these credentials **released to the host** and says
+  plainly what that means. Nothing pretends to a guarantee it cannot
+  make.
+
+Migration for existing identities: read plaintext, write sealed, on
+first start after the upgrade.
+
+---
+
+## 7 · Feeds: connectors that propose
+
+Generalise the scrobbler into a framework, and keep the ROADMAP's
+sharpest rule intact — **proposals are not facts, and only a person
+keeps them.**
+
+### A connector is a manifest plus a runner
+
+    id             lastfm
+    name           Last.fm scrobbles
+    credentials    [{ key: "api_key", label: …, class: "host" },
+                    { key: "user",    label: …, class: "host" }]
+    schedule       hourly
+    produces       com.cultureblocs.bead
+    dedupeKey      scrobble:{user}:{sessionStart}
+    provenance     { app: "lastfm" }
+    state          proposal
+
+`workers/scrobbler.py` becomes the first instance almost unchanged: it
+already clusters, already mints one bead per closed session, already
+has an idempotent dedupe key, already only closes complete sessions.
+What it gains is registration, a scoped grant instead of the master
+token, and a `state` it sets explicitly instead of the timeline
+inferring it from an app-name list.
+
+### Where runners live
+
+- **Host runners** (default): registered with the String, scheduled by
+  systemd timers as today. Required for anything needing a credential
+  the browser cannot hold or a poll while you sleep — Last.fm, IMAP.
+- **Client runners**: run inside Loom against CORS-friendly APIs with
+  device credentials. Useful for connectors nobody wants to hand a
+  server, and the reason the manifest names a credential *class*.
+
+Same manifest either way; the runner location is a property, not a fork.
+
+### The Feeds surface
+
+One list: each connector, its last run, its next run, how many
+proposals are waiting, and a switch. Then a **review queue** — the
+dotted rail, gathered in one place instead of scattered through the
+days. Keep, discard, or keep-and-tell (which opens Compose with the
+bead attached). A connector that has produced nothing for a week says
+so; a connector whose credential expired says that instead of failing
+quietly, which is the scrobbler's current behaviour and a real source
+of missing history.
+
+### Connectors worth specifying next
+
+| Connector | Produces | Notes |
+|---|---|---|
+| Last.fm | `listen` beads | exists; port first |
+| Booking mail | `booking` beads | ROADMAP §2; JSON-LD `EventReservation` in most confirmations. Future tense — the stub before the show |
+| Browser extension | `note` beads with links | the del.icio.us gesture; posts to Loom's local store via the same grant model |
+| Letterboxd / Trakt | `watch` beads | RSS is enough; no credential class beyond a username |
+| Calendar | context, not beads | *shows* what you had on that day beside the thread, and never mints. We are not replacing calendars |
+
+The calendar row matters: a connector is allowed to be *context only*.
+Not every feed has to produce a record.
+
+---
+
+## 8 · Publishing
+
+Unchanged in intent, moved in place. Loom publishes client-side, as
+Easel and Pocket already do, using the OAuth session — so the String is
+not required in order to publish, and a Loom user with no String at all
+still has the full loop.
+
+- One canonical strip in `loom/lib/strip.js`, fixture-tested against
+  `publisher.py` (R5).
+- Drift against `publishedCanonical`, exactly Easel's model — the
+  timeline's per-strand publish/republish/unpublish becomes a Publish
+  surface listing everything public and everything that has moved since.
+- One-click publish for a lone bead (ROADMAP §1) falls out for free:
+  it is an auto-titled single-item strand, and Compose already builds
+  strands.
+- The round trip (`scripts/import_repo.py`) becomes a Loom action:
+  pull born-public beads home to be told, republish in place.
+
+---
+
+## 9 · Build order
+
+Each phase ends somewhere usable. Nothing is retired at any point.
+
+**Phase 0 — foundations, no new app.** *Small, and valuable even if
+Loom stops here.*
+- `lexicon.js` port + shared fixture suite (R8).
+- `strip.js` + cross-language strip fixtures (R5).
+- `changes` gains `hlc`, `device_id`, `actor`; `patch` takes `If-Match`
+  (R6, R9).
+- Records grow an explicit `state`; the scrobbler sets `proposal`;
+  timeline reads it instead of `MACHINE_APPS` (R7, R1).
+
+**Phase 1 — Loom, local only.** IndexedDB store, Thread (read the
+day/month), Mint (quick bead, offline queue), Compose (full entry).
+No server, no sign-in, no sync. Installable PWA. *This is already a
+complete app for one device.*
+
+**Phase 2 — sync.** `com.cultureblocs.sync.server` discovery record;
+service-auth verification; `POST /changes` and `GET /sync`; grants
+table; CORS narrowed (R3, R4). Sign in on a second device and the
+string is there.
+
+**Phase 3 — vault and feeds.** `vault.item` lexicon; passphrase-derived
+key; host-key sealing and identity migration (R2); connector manifests;
+scrobbler ported; review queue.
+
+**Phase 4 — publish.** Publish surface, drift, single-bead publish,
+round trip.
+
+**Phase 5 — decide by use.** After a season of daily use, ask what
+timeline and Pocket are still for. Studio keeps Web Serial; Easel keeps
+the diary/publishing separation the ROADMAP draws. Retire nothing on
+argument alone.
+
+---
+
+## 10 · Open questions
+
+- **The name.** *Loom* is the working title — the frame that holds
+  threads while you work them, which sits right beside the quipu.
+  Alternatives: *Knot*, *Frame*, *Desk*.
+- **Passphrase recovery.** A forgotten vault passphrase means
+  re-entering every credential. Acceptable? A printed recovery code is
+  the usual answer and adds a surface to get wrong.
+- **Automerge, later or never.** §4 argues later. If two-device
+  narrative editing turns out to be common, that judgement was wrong
+  and the answer is Groundmist's directly.
+- **Does the sync-server record belong upstream?** `xyz.groundmist.
+  sync` may already define one. Pointing at their NSID rather than
+  minting `com.cultureblocs.sync.server` is better if the shapes agree
+  — the same reasoning that made us adopt the community calendar
+  lexicons rather than keep `venue.listing`.
+- **Whether the phone posture holds.** The ROADMAP says no timeline on
+  the phone and means it. §3 softens that to a default. If the softened
+  version turns the phone into a feed, the principle was right and the
+  posture should become a hard split again.
+
+## Related
+
+- [`ROADMAP.md`](https://github.com/geocontrol/cultureblocs-string/blob/main/ROADMAP.md) — §1 (the String), §2 (capture surfaces,
+  witness workers). Loom is a way of doing much of both at once.
+- [`HOST-SPEC.md`](https://github.com/geocontrol/cultureblocs-string/blob/main/HOST-SPEC.md) — the DataBrick, which this design
+  turns into a personal sync server in the Groundmist sense.
+- [`PROMOTER.md`](https://github.com/geocontrol/cultureblocs-string/blob/main/PROMOTER.md) — the strip rules Loom must reproduce
+  exactly.
+- [groundmist.xyz](https://groundmist.xyz/) — and grjte's three essays
+  on ATProto as a [distribution](https://whtwnd.com/grjte.sh/3lndb5weupc2r),
+  [legibility](https://whtwnd.com/grjte.sh/3lndyhyvqdc2w) and
+  [interoperability](https://whtwnd.com/grjte.sh/3lne2va62nc2y) layer
+  for local-first software.
