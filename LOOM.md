@@ -91,14 +91,24 @@ answer, not a complaint about work that has served well.
 | R2 | `db.py: identities` | App passwords sit in plaintext SQLite. The README says so honestly. A synced credential store must not repeat this. |
 | R3 | `main.py: auth` | `STRING_TOKEN` is one shared bearer for the entire surface. Any client holding it — a browser tab, a phone, a cron worker — can read every record and rewrite every identity. There is no scoping and no revocation short of rotating everything. |
 | R4 | `main.py` CORS | `allow_origins=["*"]`. With a token set this is survivable; with the token unset ("home lab mode") any page you happen to visit can read and write `localhost:8100`. |
-| R5 | `publisher.py` + `easel/lib/publish.js` | Two independent implementations of the strip. They agree today. Nothing enforces that they keep agreeing, and the failure mode is publishing something that should never have left. |
+| R5 | `publisher.py`, `scripts/promote.py`, `scripts/export_public.py` | Three copy-pasted implementations of the bead/strand strip (Easel publishes only `creative.work` and has none). They agree today. Nothing enforces that they keep agreeing — and Loom will add a fourth, in JavaScript — and the failure mode is publishing something that should never have left. |
 | R6 | `db.py: patch` | Shallow merge, last-writer-wins, no revision precondition. Two tabs — never mind two devices — silently lose each other's edits. |
 | R7 | `timeline: isMachine` | `MACHINE_APPS` is a hardcoded array in the page. Every new connector means editing the UI to keep the dotted rail honest. |
 | R8 | validation | Lives only on the server. A client that cannot validate offline is not local-first; it is a form that posts to an API. |
 | R9 | `changes` | One-directional, and each row stores a full body. It grows without bound and carries no actor or device, so bidirectional sync would echo a device's own writes back at it. |
+| R10 | `defs#workRef`, `bead`, `strand` | An entry can name a work in prose but cannot properly *reference* one. `#workRef` has a few fixed id slots (`wikidata`, `accession`, `linkedArt`) but no open `externalIds`, no role and no text anchor; `strand` has no ref field at all. Worse, a work has two homes on a bead — the declared `subject` union and an undeclared `work` field the timeline and `strip_bead` use — and `strip_bead` reduces `subject` to `{name}`, so a workRef subject never publishes. Two people writing about the same thing produce records that cannot be connected, so the corpus never becomes a graph. |
 
 R3, R8 and R9 are the ones that actually block a local-first client.
-The rest are worth fixing on the way past.
+R10 blocks something different: without it Loom is a very good private
+diary and nothing else, and the whole argument for publishing rests on
+entries finding each other. The rest are worth fixing on the way past.
+
+*A note on R5 found while specifying R10.* The strip is an **allowlist**
+at the top level and passes whatever it allows through whole. So the
+realistic failure is a nested field riding out inside an allowed one —
+`annotation.work.image`, a local `mediaRef` URI, publishes today — and,
+for any new field, silently never publishing at all. The fixture suite
+has to assert nested shapes, not just top-level keys.
 
 ---
 
@@ -148,7 +158,14 @@ from being kept and included.
 into an entry at breakfast. The bead does not change — the strand wraps
 it. The mint fact stays sacred; the telling accretes around it. This is
 the single most important interaction in the app and should be one
-button on a bead: *tell this*.
+button on a bead: *tell this*. The strand starts with any refs the bead
+already carries (§9), offered as mentions to be kept, not copied in
+silently — the bead's subject is not necessarily the telling's.
+
+**Refs.** Compose gains a refs rail (§9.7) listing what the entry is
+about and what it reaches for. It does not appear in totem posture:
+resolution is a desk ritual, and Mint on the phone does no resolution
+at all.
 
 ---
 
@@ -177,6 +194,12 @@ PSS will hold, so sync is a copy rather than a translation:
   publishes.
 - **Blobs** content-addressed by SHA-256 in a second store, exactly as
   Easel does, with the same orphan sweep.
+- **Resolver cache** in a third store (§9.6): authority lookups, local
+  match history, per-ref `matchConfidence` and `clusterHint`, and
+  candidate refs not yet kept. Derived state — not lexicon-validated,
+  never synced as records, never published, same orphan sweep as blobs.
+  A kept ref's confirmed status is expressed by its presence in the
+  record body, so the `state` enum does not change.
 
 ### Legibility: the validator moves to the client
 
@@ -214,6 +237,12 @@ concurrently, the loser is *not* discarded — it is kept as a conflict
 shadow on the record and the UI says so, with both versions offered.
 Silent loss is the thing to avoid; a merge algorithm is not the only way
 to avoid it.
+
+One exception to "per field": **`refs` and the text field its anchors
+point into** (`strand.narrative`, `bead.note`, `annotation.note`) are a
+single conflict unit, compared and won together. Otherwise one device's
+narrative can win while another's refs win, and every byte offset
+points at the wrong words.
 
 The upgrade path stays open: `narrative` and `note` can later become
 Automerge text documents stored beside the record, synced as binary
@@ -297,6 +326,13 @@ personal sync server, and this design makes that framing literal). The
 AppView stays an index of *public* references only. Publishing stays a
 deliberate act with the same strip.
 
+One corollary from §9.6: the AppView indexes public refs, but Loom
+**resolves locally first** and never needs the AppView to know what an
+entry is about. The AppView's "no identity resolution beyond DIDs" rule
+holds because person refs only publish when they already carry a DID or
+a public identifier (§9.8) — it clusters works, events, venues and
+concepts by descriptor, and people only by identifiers they already have.
+
 ---
 
 ## 6 · The vault: credentials that sync
@@ -337,6 +373,9 @@ encrypted; a server that must use a secret must be able to read it.
 
 Migration for existing identities: read plaintext, write sealed, on
 first start after the upgrade.
+
+Authority API keys (TMDb and the like, §9.6) are **host class** by this
+taxonomy. No new vault machinery.
 
 ---
 
@@ -400,6 +439,14 @@ of missing history.
 The calendar row matters: a connector is allowed to be *context only*.
 Not every feed has to produce a record.
 
+That makes three connector classes, named in the manifest's `produces`:
+
+- **produces records** — Last.fm, booking mail, Letterboxd.
+- **context only** — calendar.
+- **proposes refs** — the resolver (§9.2). It reads records rather than
+  minting them, and its output lives in the resolver cache until a
+  person keeps a ref. The review queue gains a refs tab.
+
 ---
 
 ## 8 · Publishing
@@ -419,26 +466,300 @@ still has the full loop.
   strands.
 - The round trip (`scripts/import_repo.py`) becomes a Loom action:
   pull born-public beads home to be told, republish in place.
+- Refs publish under the rules in §9.8, fixture-tested in both
+  languages alongside the rest of the strip.
 
 ---
 
-## 9 · Build order
+## 9 · Referents
+
+*What an entry is about, as data rather than as prose.* Fixes R10. It
+sits after Publishing because the strip rules in §8 are a precondition
+for publishing refs at all.
+
+### 9.1 The problem
+
+A strand's `narrative` can say that the book was Ben Pester's *The
+Expansion Project*, that it rhymes with *Severance* and with a couple
+of early *Twilight Zone* episodes, and that its ancestry runs back
+through the SF New Wave to Priest, Harrison and Ballard. All of that
+is legible to a human reader and invisible to everything else.
+
+Prose does not join. Two people write two paragraphs about the same
+film and there is no common key anywhere in either record. The
+referent layer is that key: a small structured array beside the text,
+naming the things the entry is about and the things it reaches for.
+
+The text is never rewritten. No wikilinks, no inline markup, no
+square brackets. A ref is metadata *alongside* the text, so the
+narrative stays editable, translatable and plain, and a reader that
+ignores refs entirely still renders a diary entry correctly.
+
+This is the move ATProto already makes with `facets` on a post: byte
+range plus feature, text untouched, rendering left to the client. The
+lexicon description says so, and the anchor uses facets' field names,
+because anyone who has implemented facets has already implemented most
+of this.
+
+### 9.2 Refs are proposals
+
+**A candidate ref is exactly what §7 already describes.** A machine
+suggests, a person keeps, the dotted rail renders it as a proposal.
+The extractor is a connector: it registers with a manifest, runs on a
+schedule or on demand, and differs from the scrobbler only in that it
+proposes refs rather than records.
+
+What follows:
+
+- **No seventh surface.** Compose grows a rail; Feeds gains a
+  `resolver` row; §7's review queue gains a refs tab.
+- **Candidates never enter a record.** Proposals live in the resolver
+  cache (§4). Only a ref a person has kept is written into the record
+  body, so nothing unconfirmed is ever lexicon-validated, synced as a
+  record, or published.
+- **Candidates do not sync.** They are regenerable from the text. A
+  second device re-runs the extractor rather than receiving another
+  device's guesses; the kept refs arrive with the record.
+- **R1 does real work.** Re-running the extractor over an edited
+  narrative *should* revise its proposals. A ref already kept must not
+  be touched — the revisable-proposal / immutable-mint split, one level
+  down.
+
+### 9.3 `defs#ref`
+
+A new shared definition:
+
+```
+defs#ref
+  type         person | work | event | venue | concept     knownValues
+  role         subject | mention
+  descriptor   { label, creator?, creatorDid?, date? }     required
+  did          DID of the referent itself                  optional
+  externalIds  [ defs#externalId ]                         optional
+  index        { byteStart, byteEnd }                      optional
+```
+
+`descriptor` is required and is the portable payload; everything else
+is an optimisation. A ref with nothing but a label and a creator is
+valid, publishable and clusterable — badly, but clusterable. The long
+tail is the point: the zine bought at a fair, the noise gig in a
+basement, the Bandcamp-only tape. None have identifiers and all belong
+in the diary. `label` rather than `title` because a person or a
+concept has no title; `date` is freeform, exactly as in `#workRef`.
+`did` identifies the referent itself — a person, or a venue with an
+account — while a work's maker goes in `descriptor.creatorDid`.
+
+There is **no `note`** in the descriptor. A free-text field written by
+the author is subject to no strip, and "saw this with J after the
+thing at hers" is exactly what would end up in it.
+
+**`externalIds` reuses the existing `defs#externalId`** (`{ scheme, id,
+uri? }`) rather than inventing a second shape. Its `knownValues` grow
+by `isbn`, `olid`, `tmdb`, `linkedArt` and `accession`; the existing
+`wikidata`, `musicbrainz` and the rest stand. The vocabulary is open —
+an unknown scheme is carried, not rejected.
+
+**Resolver bookkeeping is not in the lexicon.** `matchConfidence` (how
+sure the resolver was) and `clusterHint` (the AppView's cluster id)
+live in the resolver cache, keyed by record path and ref, never in the
+body. Neither should ever publish, the public def stays clean, the
+name no longer collides with `annotation.matchConfidence`, and there is
+no float in an ATProto record. A cluster id is also **never the
+identity**: if refs joined on cluster ids the graph would only exist
+through one AppView. Any indexer must be able to rebuild it from
+`descriptor`, `did` and `externalIds` alone.
+
+**Where `refs` goes.** `refs` (array, `maxLength` 50) is added to
+`bead`, `strand` and `annotation`, and **refs owns works**:
+
+- A work, person, event or concept an entry is about is a ref with
+  `role: subject`.
+- `bead.subject` narrows to what it already carries in practice —
+  `#placeRef` and `#strongRef`. `#workRef` leaves the union.
+- `#workRef` is deprecated. Readers map an existing one to
+  `{ type: work, role: subject, descriptor: { label: title, creator,
+  creatorDid, date }, externalIds: [wikidata, linkedArt,
+  accession…] }`. Existing data needing migration: one annotation's
+  `work`, and zero beads. The undeclared `bead.work` field used by the
+  timeline and `strip_bead` is retired in the same step.
+- `annotation.work` stays required for now — it is the AR gallery's
+  contract — and is mirrored as a subject ref on write until that
+  surface migrates.
+
+A strand's refs are *not* the union of its beads' refs. The Ballard
+mention belongs to the telling, not to any bead.
+
+### 9.4 Subject and mention
+
+`role` is the highest-value field in the def and the cheapest to
+implement.
+
+- **subject** — what the bead or entry is *about*. Usually one,
+  occasionally two.
+- **mention** — invoked, compared, gestured at.
+
+Without it the Pester entry deposits nine refs of equal weight, and
+*Severance*'s cluster fills with entries by people writing about
+something else. Every well-known work accumulates a fog of entries not
+about it, and evidence weighting stops meaning anything: a mention is
+not a watch, not a read, not an attendance. Readers do the obvious
+thing — reads shown prominently, "mentioned in" as a quieter shelf.
+
+**Deliberately not doing:** typed relations. `influencedBy`,
+`resembles`, `descendsFrom` are where twenty years of semantic web
+effort went. Subject versus mention is unambiguous, needs no ontology,
+and captures nearly all of the value.
+
+### 9.5 Presentation
+
+A new optional object on `bead`:
+
+```
+presentation
+  format      string, knownValues hints     "IMAX 70mm", "35mm", "streaming", "hardback"
+  venueRef    defs#ref (type venue)         optional
+  eventRef    defs#ref (type event)         optional
+```
+
+Two people log the same film. The work ref is identical, which is what
+connects them. One saw it at the Peckhamplex, the other on IMAX 70mm,
+and one of them found it awe-inspiring. The work explains why they are
+in the same conversation; the presentation explains why they disagree.
+
+This is the manifestation layer. Record at the level the person knew —
+"I read *The Left Hand of Darkness*" is a complete claim and nobody
+should be made to pick an edition — but capture the edition when they
+do know it, because an index can generalise upward and never downward.
+For film and live work the manifestation is a screening or a
+performance, which is an event: hence `eventRef`.
+
+`venueRef` is a *reference* to a venue, not a location, and carries no
+coordinates. `bead.subject`'s `#placeRef` remains where-you-were, with
+geo, stripped to its name as today. The two can name the same place;
+only one of them can ever carry a coordinate.
+
+### 9.6 Resolution: local first
+
+Resolution cannot be an AppView-only concern. A background task
+querying Wikipedia and TMDb as you type transmits the contents of an
+unpublished — possibly never-to-be-published — draft to third parties,
+continuously. The strip exists to stop exactly that class of leak, and
+this would route around it. So:
+
+1. **Extraction is local.** A small model in the browser or on the
+   host. Never a remote call.
+2. **Resolution hits the local cache first** — everything this person
+   has resolved before, plus whatever the AppView has synced.
+3. **Remote authority lookups are explicit and batched**, on opening
+   the rail, never per keystroke. Optionally proxied through the String
+   so upstream sees a service, not a user.
+
+**Wikidata is the hub, everything else is a spoke.** It already carries
+cross-references to OpenLibrary, MusicBrainz and TMDb, so one lookup
+gets the set. IMDb is not used — proprietary ids, no reusable public
+API, hostile terms. Authority API keys are host credentials (§6).
+
+### 9.7 The refs rail
+
+Compose gains a rail listing what the extractor found: the detected
+string, the proposed type, and candidate referents with their member
+counts from the AppView where available.
+
+- **Default every candidate to off.** The Pester entry surfaces fifteen.
+  Unticking fourteen is worse than ticking three.
+- **Never ask twice for what an answer implies.** Keeping *The
+  Expansion Project* fills its descriptor's `creator` with Ben Pester
+  from the work record. It does not add a separate person ref — that
+  would be a second claim the person did not make.
+- **Unresolved is publishable.** Never gate publishing on resolution.
+  When someone else later resolves the same string confidently, the
+  entry surfaces in a backfill queue: *12 of your entries now have
+  suggested matches.* A pleasant optional activity, not a tax on
+  capture.
+
+**Posture.** No rail in totem posture (§3).
+
+**Reverse entry.** Compose is prose first, entities extracted
+backwards. Mint from a search box is the other direction: resolve
+first, then write into a bead already connected. Totem beads need the
+first because the totem does not know what you watched; manual entry
+usually wants the second.
+
+### 9.8 Strip rules
+
+R5 territory: the fixtures land in the same commit as the lexicon
+change. Because the strip is an allowlist that passes allowed values
+whole (§2), refs are **stripped per item and per sub-field**, not by
+allowing the `refs` key.
+
+| Field | Publishes | Why |
+|---|---|---|
+| `type` | yes | needed to render and to cluster |
+| `role` | yes | the whole point of the distinction |
+| `descriptor.label`, `.creator`, `.creatorDid`, `.date` | yes | the portable payload |
+| `did` | yes | a public identifier by definition |
+| `externalIds` | yes | what makes matching free |
+| `index` | yes | readers need it to render inline |
+| anything else on a ref | **no** | unknown fields never ride out |
+
+**Person refs publish only if identified.** A `type: person` ref
+publishes only when it has a `did` or at least one `externalId` — a
+creator, a public figure. A bare-name person ref ("J") is kept locally,
+works in the diary, and is dropped by the strip. The fixture suite
+asserts both halves. This is also what keeps the AppView inside its own
+"no identity resolution beyond DIDs" rule.
+
+`presentation.format`, `.venueRef` and `.eventRef` publish, the refs
+under the same per-field rules. None carry coordinates; the geo strip
+is unaffected.
+
+### 9.9 Offsets
+
+`index` uses **UTF-8 byte offsets**, matching ATProto facets, and
+anchors into the record's own text: `narrative` on a strand, `note` on
+a bead or annotation.
+
+Text limits are in *graphemes*. These are different units, and mixing
+them is a bug that surfaces the first time someone writes about a film
+with an accented title. There is a second trap already present:
+`lexicon.py` enforces `maxGraphemes` with `len()`, which counts code
+points. The JS port must match whatever Python does, and the fixture
+suite includes accented, combining-mark and emoji cases so the two —
+and the byte offsets — cannot drift.
+
+**Editing.** When the text changes, the client re-anchors each ref by
+finding its previously anchored substring; if it cannot, the `index`
+is dropped and the ref stays. A lost anchor is cosmetic; a wrong one
+underlines the wrong words. `refs` and its text are one conflict unit
+for sync (§4).
+
+---
+
+## 10 · Build order
 
 Each phase ends somewhere usable. Nothing is retired at any point.
 
 **Phase 0 — foundations, no new app.** *Small, and valuable even if
-Loom stops here.*
+Loom stops here.* Lands in `cultureblocs-string`.
 - `lexicon.js` port + shared fixture suite (R8).
-- `strip.js` + cross-language strip fixtures (R5).
+- `strip.js` + cross-language strip fixtures (R5), including nested
+  shapes; fix the `annotation.work.image` leak.
 - `changes` gains `hlc`, `device_id`, `actor`; `patch` takes `If-Match`
   (R6, R9).
 - Records grow an explicit `state`; the scrobbler sets `proposal`;
   timeline reads it instead of `MACHINE_APPS` (R7, R1).
+- Refs lexicon work (R10): `defs#ref`; `externalId` knownValues
+  extended; `refs` on `bead`, `strand`, `annotation`; `presentation` on
+  `bead`; `#workRef` removed from `bead.subject` and deprecated; the
+  undeclared `bead.work` retired and the one existing `annotation.work`
+  mirrored. Ref cases — including bare-name person refs and multibyte
+  offsets — in both fixture suites. `APPVIEW.md` notes how refs cluster.
 
 **Phase 1 — Loom, local only.** IndexedDB store, Thread (read the
-day/month), Mint (quick bead, offline queue), Compose (full entry).
-No server, no sign-in, no sync. Installable PWA. *This is already a
-complete app for one device.*
+day/month), Mint (quick bead, offline queue), Compose (full entry,
+with a manual ref editor — a form over an array, so refs are written
+from day one). No server, no sign-in, no sync. Installable PWA. *This
+is already a complete app for one device.*
 
 **Phase 2 — sync.** `com.cultureblocs.sync.server` discovery record;
 service-auth verification; `POST /changes` and `GET /sync`; grants
@@ -447,7 +768,8 @@ string is there.
 
 **Phase 3 — vault and feeds.** `vault.item` lexicon; passphrase-derived
 key; host-key sealing and identity migration (R2); connector manifests;
-scrobbler ported; review queue.
+scrobbler ported; review queue. The resolver connector, resolver cache,
+authority lookups and refs rail land here too — they *are* a connector.
 
 **Phase 4 — publish.** Publish surface, drift, single-bead publish,
 round trip.
@@ -455,11 +777,12 @@ round trip.
 **Phase 5 — decide by use.** After a season of daily use, ask what
 timeline and Pocket are still for. Studio keeps Web Serial; Easel keeps
 the diary/publishing separation the ROADMAP draws. Retire nothing on
-argument alone.
+argument alone. Ask too whether subject versus mention survived contact
+with real use, and whether anyone ever touched the backfill queue.
 
 ---
 
-## 10 · Open questions
+## 11 · Open questions
 
 - **The name.** *Loom* is the working title — the frame that holds
   threads while you work them, which sits right beside the quipu.
@@ -479,6 +802,27 @@ argument alone.
   the phone and means it. §3 softens that to a default. If the softened
   version turns the phone into a feed, the principle was right and the
   posture should become a hard split again.
+- **How `concept` refs resolve.** Movements and genres — the SF New
+  Wave, liminal horror — are not works, people, events or venues.
+  Wikidata QIDs give a clean head and a bad tail; free tags are cheap
+  and produce tag soup, and `bead.tags` already exists for the mask.
+  Fuzzy is probably acceptable because nothing downstream depends on
+  precision, but decide it rather than let concepts fall in as
+  second-class works.
+- **Whether sameness assertions go public.** A `com.cultureblocs.sameAs`
+  record would put identity judgements in the atmosphere — signed,
+  portable, with provenance — rather than in one AppView's database,
+  and let a second AppView bootstrap warm. Costs: write volume, and a
+  tap in a picker minting a public record. If done, mint on *publish*,
+  not on resolve.
+- **Whether the extractor may ever call out.** §9.6 says no. A local
+  model good enough for titles, names and venues is a real constraint,
+  and sits awkwardly with "no build step". The honest fallback if it is
+  too weak is explicit, batched, user-initiated remote extraction with
+  a clear label — never a quiet background call.
+- **Naming the ref layer.** *Warp* was offered: the threads the loom is
+  strung with before work begins, which every cloth on it shares. The
+  UI says *Refs* for now.
 
 ## Related
 

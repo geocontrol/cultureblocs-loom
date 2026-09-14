@@ -61,7 +61,7 @@ Phase 0 lands entirely in `cultureblocs-string` (a client-side lexicon
 validator, one canonical publish strip with cross-language fixtures,
 HLC on the change feed, an explicit record `state`) and is worth having
 even if Loom stops there. Phases 1–5 live here. Details in
-[LOOM.md §9](LOOM.md#9--build-order).
+[LOOM.md §10](LOOM.md#10--build-order).
 
 ## Prior art worth reading
 
