@@ -116,7 +116,7 @@ has to assert nested shapes, not just top-level keys.
 
 One responsive page, one codebase, six surfaces. Vanilla ES modules and
 IndexedDB, in the manner of Easel and Pocket — no framework, no build
-step, served as static files (`:8105` in compose; deployable to
+step, served as static files (`:8108` in compose; deployable to
 cultureblocs.com like Pocket, because the OAuth client id must be a
 stable URL).
 
@@ -800,7 +800,11 @@ Loom stops here.* Lands in `cultureblocs-string`.
 day/month), Mint (quick bead, offline queue), Compose (full entry,
 with a manual ref editor — a form over an array, so refs are written
 from day one). No server, no sign-in, no sync. Installable PWA. *This
-is already a complete app for one device.*
+is already a complete app for one device.* Until Phase 2, existing
+records arrive by a deliberate one-way import from the String, and
+Loom-made records reach it by a deliberate send over the String's
+existing API; desk-first on localhost, phone once hosted over HTTPS.
+Design: [`docs/superpowers/specs/2026-09-14-loom-phase1-design.md`](docs/superpowers/specs/2026-09-14-loom-phase1-design.md).
 
 **Phase 2 — sync.** `com.cultureblocs.sync.server` discovery record;
 service-auth verification; `POST /changes` and `GET /sync`; grants
