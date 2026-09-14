@@ -231,7 +231,8 @@ genuinely earns its weight is concurrent editing of a long text field —
 the common case.
 
 So: **field-level last-writer-wins, ordered by a hybrid logical clock**
-(`hlc` = `<physical ms>.<counter>.<deviceId>`), which is a few dozen
+(`hlc` = `<physical ms>-<counter>-<node>`, fixed-width so string order is
+causal order), which is a few dozen
 lines and no wasm. When two devices did write the same field
 concurrently, the loser is *not* discarded — it is kept as a conflict
 shadow on the record and the UI says so, with both versions offered.
@@ -329,9 +330,10 @@ deliberate act with the same strip.
 One corollary from §9.6: the AppView indexes public refs, but Loom
 **resolves locally first** and never needs the AppView to know what an
 entry is about. The AppView's "no identity resolution beyond DIDs" rule
-holds because person refs only publish when they already carry a DID or
-a public identifier (§9.8) — it clusters works, events, venues and
-concepts by descriptor, and people only by identifiers they already have.
+holds because a person's name only publishes when it already carries a
+DID or a public-authority identifier (§9.8) — it clusters works, events,
+venues and concepts by descriptor, and people only by identifiers they
+already have.
 
 ---
 
@@ -541,7 +543,8 @@ defs#ref
 
 `descriptor` is required and is the portable payload; everything else
 is an optimisation. A ref with nothing but a label and a creator is
-valid, publishable and clusterable — badly, but clusterable. The long
+valid and clusterable — badly, but clusterable — and publishes its label
+(the creator's name waits for an identifier, §9.8). The long
 tail is the point: the zine bought at a fair, the noise gig in a
 basement, the Bandcamp-only tape. None have identifiers and all belong
 in the diary. `label` rather than `title` because a person or a
@@ -696,18 +699,56 @@ allowing the `refs` key.
 |---|---|---|
 | `type` | yes | needed to render and to cluster |
 | `role` | yes | the whole point of the distinction |
-| `descriptor.label`, `.creator`, `.creatorDid`, `.date` | yes | the portable payload |
-| `did` | yes | a public identifier by definition |
-| `externalIds` | yes | what makes matching free |
+| `descriptor.label`, `.date` | yes | the portable payload |
+| `descriptor.creator` | **only if identified** | a maker's bare name may be a private individual — see below |
+| `descriptor.creatorDid` | yes, if a well-formed DID | a public identifier by definition |
+| `did` | yes, if a well-formed DID | a public identifier by definition |
+| `externalIds` | yes — on person refs, authority schemes only | what makes matching free; see below |
 | `index` | yes | readers need it to render inline |
 | anything else on a ref | **no** | unknown fields never ride out |
 
-**Person refs publish only if identified.** A `type: person` ref
-publishes only when it has a `did` or at least one `externalId` — a
-creator, a public figure. A bare-name person ref ("J") is kept locally,
-works in the diary, and is dropped by the strip. The fixture suite
-asserts both halves. This is also what keeps the AppView inside its own
-"no identity resolution beyond DIDs" rule.
+Three rules protect people who never chose to be in the atmosphere. The
+strip enforces each in both languages, and the shared fixtures assert
+both halves of each.
+
+**A person's name publishes only if they are already public.** A
+`type: person` ref publishes only when it carries a well-formed `did`, or
+an `externalId` from a **public authority** — a registry of people who
+are already public figures:
+
+    wikidata · viaf · isni · orcid · musicbrainz · discogs · ipi
+
+On a person ref, ids from any other scheme — an email, a handle, a
+phone number, a scheme nobody has heard of — are dropped at publish,
+even when an authority id is present, and do not count towards being
+identified. A bare-name person ref ("J") is kept locally, works in the
+diary, and is dropped by the strip. This is also what keeps the AppView
+inside its own "no identity resolution beyond DIDs" rule.
+
+**Unrecognised types are treated as people.** `type` is an open
+vocabulary, so the rule above cannot key on the literal string `person`:
+`"Person"`, `"individual"` or a resolver's typo would walk straight past
+it. Any ref whose type is not `work`, `event`, `venue` or `concept` is
+held to the person rule — it publishes only if identified, with
+authority ids only — and publishes its `type` as authored when it does.
+Works, events, venues and concepts keep the open id vocabulary
+(`isbn`, `tmdb`, `accession`…), because those identify things, not people.
+
+**A maker's name publishes only when the work is identified.** A
+`descriptor.creator` is a bare name, and "a painting by J" names a
+private person as surely as a person ref does. It publishes when the
+maker is identified by a well-formed `creatorDid`, or when the thing
+itself is identified — its own well-formed `did`, or an external id that
+survives the strip — because then the maker's name is already public
+record. Otherwise the label publishes and the creator stays local. The
+same rule applies to the deprecated `annotation.work` (identified by
+`creatorDid`, `wikidata`, `linkedArt` or `accession`).
+
+This costs the long tail something real: the zine bought at a fair and
+the Bandcamp-only tape publish without a maker's name, so they cluster
+on title and date alone until someone resolves them. That is the right
+way round — the backfill queue (§9.7) can add a name later; nothing can
+take one back out of the atmosphere.
 
 `presentation.format`, `.venueRef` and `.eventRef` publish, the refs
 under the same per-field rules. None carry coordinates; the geo strip
