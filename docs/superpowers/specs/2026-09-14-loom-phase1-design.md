@@ -84,7 +84,8 @@ key         "<nsid>/<rkey>"                     e.g. com.cultureblocs.bead/3lqk2
 type        nsid
 rkey        TID for Loom-made records; the String's id for imported ones
 body        the lexicon record body (always valid against app/vendor/lexicons)
-state       proposal | kept | draft            (published/edited arrive in Phase 4)
+state       proposal | kept | draft | published | edited
+            (Loom sets only the first three; the last two come from imported records until Phase 4)
 origin      mint | compose | import
 sourceApp   "loom" for Loom-made; the String's sourceApp for imported
 createdAt   ISO datetime (the record's own)
@@ -94,6 +95,7 @@ deviceId    this browser's id (generated once, kept in meta)
 day         derived, for the index
 stringId    the String's record id, once imported or sent
 importedHash  sha256 of canonical body at import time (imported records only)
+importedState the String's state at import time (imported records only)
 sentAt      when a Loom-made record was accepted by the String
 missing     [ media file names that could not be fetched ]   (optional)
 invalid     [ validator problems ]   (imported records that fail Loom's validator)
@@ -178,10 +180,12 @@ time of the last backup.
    any other record type the vendored lexicons define that the String holds).
 3. **Plan** (pure) each String record against the local store:
    - *add* — no local record with that `stringId`;
-   - *update* — local body still hashes to `importedHash` (unchanged
-     locally) and the String body differs;
-   - *unchanged* — String body hashes to `importedHash`;
-   - *conflict* — both changed; left alone and listed.
+   - *update* — unchanged locally (body still hashes to `importedHash` and
+     state equals `importedState`) and the String's body or state differs;
+   - *unchanged* — the String's body hashes to `importedHash` and its state
+     equals `importedState`;
+   - *conflict* — changed on both sides (body or state); left alone and listed.
+     Keeping or releasing an imported proposal in Loom is a local change.
 4. **Apply** one record per transaction: rewrite strand items to local keys
    (after all records are added), store, then fetch each referenced photo
    not already in `blobs` from `GET /media/<name>`; failures go to `missing`
@@ -196,12 +200,14 @@ time of the last backup.
    whose response name must equal the local name, else stop that record);
    rewrite strand items `loom://…` → `spine://records/<stringId>`;
    `POST /records` with `dedupeKey: "loom:<rkey>"`, `sourceApp: "loom"`,
-   `createdAt`, `body`, and `state` for proposals.
+   `createdAt` and `body`. (Phase 1 creates no proposals, so no `state` is
+   sent; strands arrive as the String's default `draft`.)
 3. On `created` or `duplicate`, set `stringId` and `sentAt`. On `invalid`,
    keep the record unsent and show the String's problems.
 
-Edits to records that already have a `stringId` are not sent in Phase 1;
-the panel counts them as "local changes, sync in Phase 2".
+Edits to records that already have a `stringId` — including keeping or
+releasing an imported proposal — are not sent in Phase 1; the panel counts
+them as "local changes, sync in Phase 2".
 
 ## 8 · Error handling
 
