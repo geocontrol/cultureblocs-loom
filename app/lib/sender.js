@@ -8,14 +8,17 @@
  * Photos upload before the record that uses them, unless the String already
  * has them (`stringMedia`).
  *
- * A bead's DELETE waits for every strand whose edit dropped that bead
- * (envelope.js's `remove` rewrites those strands' bodies locally before Send
- * ever runs) to be safely patched first: Loom keeps no copy of the String's
- * body, so it cannot tell from a strand's current body which bead an
- * unresolved edit concerned. The simplest safe rule stands in for that: every
- * bead delete in a Send is held while any strand's edit, pending when that
- * Send started, has not been sent — whether it is still to come, or it just
- * failed, was refused, or conflicted.
+ * A bead's DELETE waits for every strand whose edit or delete dropped (or
+ * still holds) that bead to reach the String first — envelope.js's `remove`
+ * rewrites a using strand's body locally before Send ever runs, so Loom's own
+ * copy no longer says which bead an unresolved strand change concerned.
+ * Rather than hold every bead delete on any unrelated strand trouble, Send
+ * asks the String directly: for each strand (with a stringId) whose edit or
+ * delete has not succeeded yet in this run, it fetches that strand's String
+ * copy and holds the bead delete only if those `items` still name the bead —
+ * a 404 (the strand is already gone) is not a reason to hold, but any other
+ * fetch failure is, safely. A strand whose patch or delete already sent in
+ * this run needs no fetch.
  *
  * Every request is safe to repeat. A POST carries dedupeKey "loom:<rkey>". A
  * PATCH or DELETE carries If-Match with the version Loom last saw
@@ -79,13 +82,39 @@ export async function runSend({ store, client, now = () => Date.now(), onProgres
   const { ready, held } = await planSend(records);
   const results = held.map((h) => ({ key: h.key, status: 'held', reason: h.reason }));
 
-  // Strands (on the String, not deleted) whose edit was pending when this Send
-  // started: a bead delete is held while any of these is still waiting, since
-  // it may be the strand that dropped that bead (see the header comment).
+  // Strands (with a stringId) whose edit or delete was pending when this Send
+  // started: a bead delete checks the String through these, since one of them
+  // may be the strand that dropped (or still holds) that bead (see the header
+  // comment). A strand's fetched String copy is cached for the run.
   const pendingAtStart = await pendingChanges(records);
-  const strandsWaiting = new Set(records
-    .filter((r) => r.type === STRAND && !r.deleted && r.stringId && pendingAtStart.get(r.key) === 'edit')
+  const unresolvedStrands = new Set(records
+    .filter((r) => r.type === STRAND && r.stringId && ['edit', 'delete'].includes(pendingAtStart.get(r.key)))
     .map((r) => r.key));
+  const strandItemsCache = new Map();
+
+  async function stringItemsOf(strandKey, stringId) {
+    if (strandItemsCache.has(strandKey)) return strandItemsCache.get(strandKey);
+    let items;
+    try {
+      items = list((await client.getRecord(stringId)).body?.items);
+    } catch (e) {
+      items = e.status === 404 ? null : 'unreachable';   // gone: fine; anything else: hold, safely
+    }
+    strandItemsCache.set(strandKey, items);
+    return items;
+  }
+
+  /* The key of an unresolved strand whose String copy still names this bead
+   * (or could not be checked), or null if none does. */
+  async function strandStillListing(beadStringId) {
+    for (const strandKey of unresolvedStrands) {
+      const strand = await store.getRecord(strandKey);
+      if (!strand?.stringId) continue;
+      const items = await stringItemsOf(strandKey, strand.stringId);
+      if (items === 'unreachable' || (items && items.some((it) => it?.uri === spineUri(beadStringId)))) return strandKey;
+    }
+    return null;
+  }
 
   const keyByStringId = async () => new Map((await store.allRecords()).filter((r) => r.stringId).map((r) => [r.stringId, r.key]));
 
@@ -206,12 +235,14 @@ export async function runSend({ store, client, now = () => Date.now(), onProgres
   for (const { op, key } of ready) {
     const env = await store.getRecord(key);                   // fresh: an earlier op may have set a member's stringId
     if (!env) continue;
-    if (op === 'delete' && env.type === BEAD && strandsWaiting.size) {
-      const result = { key, op, status: 'held',
-        reason: 'a strand that dropped it has not been patched on the String yet' };
-      results.push(result);
-      onProgress(result);
-      continue;
+    if (op === 'delete' && env.type === BEAD && unresolvedStrands.size) {
+      const blocker = await strandStillListing(env.stringId);
+      if (blocker) {
+        const result = { key, op, status: 'held', reason: `${blocker} still lists it on the String` };
+        results.push(result);
+        onProgress(result);
+        continue;
+      }
     }
     let result;
     try {
@@ -229,7 +260,7 @@ export async function runSend({ store, client, now = () => Date.now(), onProgres
         result = { key, op, status: 'failed', reason: e.message };
       }
     }
-    if (env.type === STRAND && op === 'patch' && result.status === 'sent') strandsWaiting.delete(key);
+    if (env.type === STRAND && (op === 'patch' || op === 'delete') && result.status === 'sent') unresolvedStrands.delete(key);
     results.push(result);
     onProgress(result);
   }

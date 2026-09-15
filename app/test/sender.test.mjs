@@ -165,6 +165,47 @@ test('a strand patch answered 412 marks it conflicted and still holds the bead d
   assert.equal((await store.getRecord(strand.key)).conflict.reason, 'send');
 });
 
+test('an unrelated strand that keeps failing does not hold a bead whose own strand already patched', async () => {
+  const { store, loom, s } = await setup();
+  const a = await makeBead(loom, { note: 'a' }), b = await makeBead(loom, { note: 'b' }), c = await makeBead(loom, { note: 'c' });
+  const strand1 = await makeStrand(loom, strandBody([a.key, b.key]));
+  const strand2 = await makeStrand(loom, strandBody([c.key]));
+  await runSend({ store, client: s.client });
+  const strand2Id = (await store.getRecord(strand2.key)).stringId;
+  await loom.remove(b.key);                                          // rewrites strand1 only
+  const strand2Now = await store.getRecord(strand2.key);
+  await loom.save(strand2.key, { ...strand2Now.body, title: 'renamed' });   // an unrelated, permanently failing edit
+  const flaky = { ...s.client, async patchRecord(id, fields, hlc) {
+    if (id === strand2Id) throw new Error('boom');
+    return s.client.patchRecord(id, fields, hlc);
+  } };
+  const results = await runSend({ store, client: flaky });
+  const byKey = Object.fromEntries(results.map((r) => [r.key, r]));
+  assert.equal(byKey[strand1.key].status, 'sent');
+  assert.equal(byKey[strand2.key].status, 'failed');
+  assert.equal(byKey[b.key].status, 'sent', 'strand2 never listed b, so it must not hold b\'s delete');
+  assert.equal(await store.getRecord(b.key), undefined);
+  const again = await runSend({ store, client: flaky });
+  assert.deepEqual(again.map((r) => [r.op, r.key, r.status]), [['patch', strand2.key, 'failed']]);
+});
+
+test('a strand whose own DELETE fails while its String copy still lists the bead holds that bead’s delete too', async () => {
+  const { store, loom, s } = await setup();
+  const a = await makeBead(loom, { note: 'a' }), b = await makeBead(loom, { note: 'b' });
+  const strand = await makeStrand(loom, strandBody([a.key, b.key]));
+  await runSend({ store, client: s.client });
+  const strandId = (await store.getRecord(strand.key)).stringId;
+  await loom.remove(strand.key);   // deleted before b, so remove(b) leaves the strand's body untouched
+  await loom.remove(b.key);
+  s.editOnString(strandId, { title: 'changed on the String' });   // the strand's own DELETE will now 412
+  const results = await runSend({ store, client: s.client });
+  const byKey = Object.fromEntries(results.map((r) => [r.key, r]));
+  assert.equal(byKey[strand.key].status, 'conflict');
+  assert.equal(byKey[b.key].status, 'held');
+  assert.match(byKey[b.key].reason, new RegExp(strand.key.replace(/[/.]/g, '\\$&')));
+  assert.equal((await store.getRecord(b.key)).deleted, true);
+});
+
 test('a PATCH answered 412 marks a conflict with the String’s version and leaves the local edit', async () => {
   const { store, loom, s, importAll } = await setup([onString('u1')]);
   await importAll();
