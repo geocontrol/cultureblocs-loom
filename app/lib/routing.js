@@ -1,6 +1,6 @@
 /* The shell's routing decisions, pure (no DOM) so node can test them.
  *
- * Routes overlap: a hashchange or a resize can start a new route while the
+ * Routes overlap: a hashchange can start a new route while the
  * last is still awaiting a mount. Each begin() supersedes every earlier route;
  * a superseded route unmounts whatever it goes on to mount, and stops. */
 export function routeSerializer() {
@@ -19,6 +19,3 @@ export function routeSerializer() {
     };
   };
 }
-
-/* 'desk' or 'totem': the posture setting, or the viewport when it is auto. */
-export const postureFor = (chosen, wide) => (!chosen || chosen === 'auto' ? (wide ? 'desk' : 'totem') : chosen);

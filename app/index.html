@@ -10,12 +10,12 @@
   <meta name="theme-color" content="#1B1D22">
   <link rel="stylesheet" href="loom.css">
 </head>
-<body>
-  <header class="bar">
-    <span class="brand">LOOM</span>
-  </header>
-  <main id="panes">
-    <section id="main" class="pane"></section>
+<body data-view="column">
+  <header id="bar" class="bar"></header>
+  <p id="banner" class="banner" hidden></p>
+  <main id="desk">
+    <nav id="column" aria-label="your String"></nav>
+    <section id="editor"></section>
   </main>
   <noscript>Loom needs JavaScript: it is the whole app.</noscript>
   <script type="module" src="loom.js"></script>
