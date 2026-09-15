@@ -7,6 +7,10 @@ const BEAD = 'com.cultureblocs.bead';
 
 export const KINDS = ['bloc', 'visit', 'dwell', 'encounter', 'read', 'listen', 'watch', 'screening', 'performance', 'note'];
 
+/* Kinds with a colour in loom.css. Only these reach an attribute; the colour
+ * itself comes from a stylesheet rule, never an inline style (see the CSP). */
+const KIND_COLOURS = [...KINDS, 'annotation'];
+
 const hhmm = (iso) => (typeof iso === 'string' ? iso.slice(11, 16) : '');
 
 export function monthView(days, { month, today }) {
@@ -42,7 +46,7 @@ function bead(r, urls) {
   const proposal = r.state === 'proposal';
   const title = b.subject?.name || b.work?.title || '';
   return html`
-    <li class="stop${proposal ? ' machine' : ''}" data-key="${r.key}" style="--k:var(--${kind}, var(--bloc))">
+    <li class="stop${proposal ? ' machine' : ''}" data-key="${r.key}" data-kind="${KIND_COLOURS.includes(kind) ? kind : 'bloc'}">
       <time>${hhmm(r.createdAt)}</time><span class="bead"></span>
       <div class="kind">${kind}</div>
       ${title ? html`<div class="title">${title}</div>` : ''}

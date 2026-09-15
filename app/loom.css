@@ -36,7 +36,12 @@ body[data-posture="desk"] #side{border-left:1px solid var(--line)}
 .reminder{font:13px var(--mono);color:var(--dwell);border:1px solid var(--dwell);padding:.4rem .6rem;border-radius:4px}
 .string,.strand>ol{list-style:none;padding-left:1.4rem;border-left:2px solid var(--ink);margin-left:.5rem}
 .string.has-machine{box-shadow:inset 6px 0 0 -4px transparent}
-.stop{position:relative;padding:.3rem 0 .9rem .6rem}
+.stop{position:relative;padding:.3rem 0 .9rem .6rem;--k:var(--bloc)}
+.stop[data-kind="visit"]{--k:var(--visit)}.stop[data-kind="dwell"]{--k:var(--dwell)}.stop[data-kind="encounter"]{--k:var(--encounter)}
+.stop[data-kind="read"]{--k:var(--read)}.stop[data-kind="listen"]{--k:var(--listen)}.stop[data-kind="watch"]{--k:var(--watch)}
+.stop[data-kind="screening"]{--k:var(--screening)}.stop[data-kind="performance"]{--k:var(--performance)}
+.stop[data-kind="note"]{--k:var(--note)}.stop[data-kind="annotation"]{--k:var(--annotation)}
+.error{color:var(--performance);border:1px solid var(--performance);padding:.4rem .6rem;border-radius:4px}
 .stop time{font:12px var(--mono);color:var(--faint);margin-right:.4rem}
 .stop .bead{position:absolute;left:-1.95rem;top:.55rem;width:12px;height:12px;border-radius:50%;background:var(--k,#999)}
 .stop.machine .bead{background:var(--paper);border:2.5px dotted var(--k,#999)}

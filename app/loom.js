@@ -4,6 +4,7 @@
 import { openLoom } from './lib/envelope.js';
 import { hashFromName } from './lib/media.js';
 import { loadRegistry } from './lib/lexicons.js';
+import { postureFor, routeSerializer } from './lib/routing.js';
 import { openStore } from './lib/store.js';
 import { mountCompose, newStrand } from './ui/compose.js';
 import { mountMint } from './ui/mint.js';
@@ -13,6 +14,8 @@ import { mountThread } from './ui/thread.js';
 const $ = (sel) => document.querySelector(sel);
 const channel = 'BroadcastChannel' in self ? new BroadcastChannel('loom') : null;
 const urls = new Map();
+const wide = matchMedia('(min-width: 900px)');
+const begin = routeSerializer();
 let mounted = [];
 let dirty = false;
 
@@ -26,7 +29,7 @@ async function boot() {
     now: () => Date.now(),
     fetch: (...a) => fetch(...a),
     broadcast: (kind = 'changed') => channel?.postMessage(kind),
-    reload: () => location.reload(),
+    reload: reloadWhenClean,
     navigate: (hash) => { location.hash = hash; },
     setDirty: (d) => { dirty = d; },
     async persisted() { return (await navigator.storage?.persisted?.()) ?? false; },
@@ -48,8 +51,7 @@ async function boot() {
   };
 
   async function applyPosture() {
-    const chosen = (await store.getMeta('posture')) || 'auto';
-    const posture = chosen === 'auto' ? (matchMedia('(min-width: 900px)').matches ? 'desk' : 'totem') : chosen;
+    const posture = postureFor(await store.getMeta('posture'), wide.matches);
     document.body.dataset.posture = posture;
     return posture;
   }
@@ -64,17 +66,22 @@ async function boot() {
   }
 
   async function routeNow() {
+    const current = begin();
     for (const m of mounted) m.unmount?.();
     mounted = [];
     const posture = await applyPosture();
+    if (!current.current) return;
     const [path, query = ''] = location.hash.replace(/^#\/?/, '').split('?');
     const [surface = '', ...rest] = path.split('/');
-    const arg = decodeURIComponent(rest.join('/'));
     const params = new URLSearchParams(query);
-    const main = $('#main'), side = $('#side');
-    main.innerHTML = side.innerHTML = '';
+    // Each route renders into its own containers: a route overtaken mid-mount
+    // keeps writing only into containers that are no longer on the page.
+    const main = document.createElement('div'), side = document.createElement('div');
+    $('#main').replaceChildren(main);
+    $('#side').replaceChildren();
     document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('on', a.dataset.nav === (surface || 'home')));
     document.body.dataset.surface = surface || 'home';
+    const arg = decodeURIComponent(rest.join('/'));
 
     if (!surface) {
       location.replace(posture === 'totem' ? '#/mint' : '#/thread');
@@ -83,41 +90,67 @@ async function boot() {
     if (surface === 'compose' && arg === 'new') {
       const strand = await newStrand(ctx, { day: params.get('day'), wrap: params.get('wrap') });
       ctx.broadcast();
-      location.replace(`#/compose/${strand.key}`);
+      if (current.current) location.replace(`#/compose/${strand.key}`);
       return;
     }
-    if (surface === 'thread') mounted.push(await mountThread(main, ctx, { period: arg }));
-    else if (surface === 'mint') mounted.push(await mountMint(main, ctx));
-    else if (surface === 'string') mounted.push(await mountPanel(main, ctx));
+    if (surface === 'thread') current.keep(await mountThread(main, ctx, { period: arg }), mounted);
+    else if (surface === 'mint') current.keep(await mountMint(main, ctx), mounted);
+    else if (surface === 'string') current.keep(await mountPanel(main, ctx), mounted);
     else if (surface === 'compose') {
       const record = await store.getRecord(arg);
-      if (posture === 'desk' && record?.day) mounted.push(await mountThread(main, ctx, { period: record.day }));
-      mounted.push(await mountCompose(posture === 'desk' ? side : main, ctx, { key: arg }));
+      if (!current.current) return;
+      if (posture === 'desk' && record?.day) {
+        if (!current.keep(await mountThread(main, ctx, { period: record.day }), mounted)) return;
+      }
+      if (posture === 'desk') $('#side').replaceChildren(side);
+      current.keep(await mountCompose(posture === 'desk' ? side : main, ctx, { key: arg }), mounted);
     } else main.textContent = 'Nothing here.';
   }
 
   window.addEventListener('hashchange', route);
-  matchMedia('(min-width: 900px)').addEventListener('change', route);
+  // Crossing the width breakpoint re-routes only if it changes the posture.
+  wide.addEventListener('change', async () => {
+    if (postureFor(await store.getMeta('posture'), wide.matches) !== document.body.dataset.posture) route();
+  });
   channel?.addEventListener('message', (e) => {
-    if (e.data === 'restored') location.reload();   // another tab replaced the store
+    if (e.data === 'restored') reloadWhenClean();   // another tab replaced the store
     else if (!dirty) mounted.forEach((m) => m.render?.());
   });
 
-  if (navigator.storage?.persist && !(await navigator.storage.persisted())) {
+  await route();
+  requestPersistence();   // not awaited: a permission prompt must not hold the first page back
+  registerServiceWorker();
+  window.loom = ctx;   // for scripted checks and the console
+}
+
+/* Write any pending draft, wait until nothing is dirty, then resolve. */
+async function whenClean() {
+  for (;;) {
+    await Promise.all(mounted.map((m) => m.flush?.()));
+    if (!dirty) return;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
+async function reloadWhenClean() {
+  await whenClean();
+  location.reload();
+}
+
+function requestPersistence() {
+  (async () => {
+    if (!navigator.storage?.persist || (await navigator.storage.persisted())) return;
     if (!(await navigator.storage.persist())) {
       const banner = $('#banner');
       banner.textContent = 'This browser may clear Loom’s storage — back up from the string panel.';
       banner.hidden = false;
     }
-  }
-
-  await route();
-  registerServiceWorker();
-  window.loom = ctx;   // for scripted checks and the console
+  })().catch((err) => console.error(err));
 }
 
 /* A new version is installed but waits; it takes over only when no edit is
- * pending, then the page reloads onto it. */
+ * pending, then every tab reloads onto it — each only once its own edits are
+ * written. */
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   // The first install claims this page too; only a replacement of an existing
@@ -126,7 +159,9 @@ async function registerServiceWorker() {
   const reg = await navigator.serviceWorker.register('./sw.js');
   let reloading = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (hadController && !reloading) { reloading = true; location.reload(); }
+    if (!hadController || reloading) return;
+    reloading = true;
+    reloadWhenClean();
   });
   const offer = () => {
     if (!reg.waiting) return;

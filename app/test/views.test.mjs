@@ -2,10 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { esc, html, raw } from '../ui/html.js';
 import { backupReminder, dayView, monthView } from '../ui/view-thread.js';
-import { mintView } from '../ui/view-mint.js';
+import { mintView, safeColor } from '../ui/view-mint.js';
 import { publishHint, refFromFields, refsView } from '../ui/view-refs.js';
 import { bodyFromFields, composeView, parseLinks } from '../ui/view-compose.js';
 import { panelView } from '../ui/view-panel.js';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { APP } from './helpers.mjs';
 
 const B = 'com.cultureblocs.bead', S = 'com.cultureblocs.strand';
 const bead = (key, extra = {}) => ({ key, type: B, rkey: key, sourceApp: 'loom', state: 'kept', createdAt: '2026-09-14T21:04:00Z',
@@ -101,4 +104,30 @@ test('annotations get no edit link in Thread: they are read-only in Phase 1', ()
   const out = String(dayView([{ kind: 'item', record: ann }, { kind: 'item', record: bead(`${B}/b`) }], { day: '2026-09-14' }));
   assert.doesNotMatch(out, new RegExp(`href="#/compose/${A}/u1"`));
   assert.match(out, new RegExp(`href="#/compose/${B}/b"`));
+});
+
+test('an imported kind cannot inject CSS: an unknown kind renders as bloc', () => {
+  const evil = bead(`${B}/e`, { body: { $type: B, createdAt: '2026-09-14T21:04:00Z', kind: 'x);background:url(//evil.test/p' } });
+  const out = String(dayView([{ kind: 'item', record: evil }, { kind: 'item', record: bead(`${B}/v`) }], { day: '2026-09-14' }));
+  assert.match(out, /data-kind="bloc"/);
+  assert.match(out, /data-kind="visit"/);
+  assert.doesNotMatch(out, /data-kind="x\)/);
+});
+
+test('views carry no inline styles or inline event handlers (the CSP forbids both)', () => {
+  const s = { key: `${S}/s`, type: S, state: 'kept', sourceApp: 'loom', createdAt: '2026-09-14T22:00:00Z', body: { title: 'T', items: [] } };
+  const outs = [
+    dayView([{ kind: 'strand', record: s, members: [bead(`${B}/a`)] }], { day: '2026-09-14' }),
+    mintView({ mask: 'ART' }),
+    composeView({ record: { type: B, state: 'kept', day: '2026-09-14' }, body: bead('x').body }),
+    panelView({ unsent: 0 }),
+  ].map(String);
+  for (const out of outs) assert.doesNotMatch(out, /\sstyle=|\son[a-z]+=/);
+  assert.equal(safeColor('#D71921'), '#D71921');
+  assert.equal(safeColor('red;background:url(//evil.test)'), null);
+});
+
+test('index.html declares the content security policy', () => {
+  const page = readFileSync(join(APP, 'index.html'), 'utf8');
+  assert.match(page, /<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; connect-src \*; worker-src 'self'; manifest-src 'self'">/);
 });

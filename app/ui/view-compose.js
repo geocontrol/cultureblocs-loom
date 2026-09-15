@@ -28,7 +28,7 @@ export function composeView(state) {
   const text = isStrand ? body.narrative || '' : body.note || '';
   const included = new Set((body.items || []).map((it) => keyFromItemUri(it.uri)));
   return html`
-    <form class="compose" data-type="${record.type}" onsubmit="return false">
+    <form class="compose" data-type="${record.type}">
       <header>
         <h2>${isStrand ? 'Entry' : 'Bead'} · ${record.day || ''}</h2>
         <span class="state chip">${record.state}</span>
