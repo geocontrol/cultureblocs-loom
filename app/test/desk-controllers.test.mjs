@@ -221,6 +221,51 @@ test('taking the String’s version asks with a second press, then replaces the 
   assert.match(root.innerHTML, />theirs<\/textarea>/);
 });
 
+test('typed text is flushed to the draft before keep-mine, so nothing typed is lost', async () => {
+  const ctx = await context();
+  const bead = await makeBead(ctx.loom, { note: 'mine' });
+  await ctx.store.putRecord({ ...bead, stringId: 's1', conflict: { theirs: { id: 's1', hlc: 'h', state: 'kept', body: { ...bead.body, note: 'theirs' } }, reason: 'import' } });
+  const root = fakeRoot([field('text', 'mine plus typed')]);
+  await mountEditor(root, ctx, { key: bead.key });
+  await root.fire('input', root.fields[0]);
+  await root.fire('click', button('keep-mine'));     // pressed within the 500ms draft debounce
+  assert.match(root.innerHTML, />mine plus typed<\/textarea>/, 'the form keeps what was typed');
+  await sleep(600);
+  assert.equal((await ctx.loom.getDraft(bead.key)).body.note, 'mine plus typed', 'the draft keeps what was typed');
+});
+
+test('typed text is flushed to the draft before take-theirs replaces the form, so nothing typed is lost', async () => {
+  const ctx = await context();
+  const bead = await makeBead(ctx.loom, { note: 'mine' });
+  await ctx.store.putRecord({ ...bead, stringId: 's1', conflict: { theirs: { id: 's1', hlc: 'h', state: 'kept', body: { ...bead.body, note: 'theirs' } }, reason: 'send' } });
+  const root = fakeRoot([field('text', 'mine plus typed')]);
+  await mountEditor(root, ctx, { key: bead.key });
+  await root.fire('input', root.fields[0]);
+  await root.fire('click', button('take-theirs'));   // first press only asks
+  await root.fire('click', button('take-theirs'));   // second press, within the 500ms draft debounce
+  assert.match(root.innerHTML, />theirs<\/textarea>/, 'the form is replaced by theirs, as before');
+  await sleep(600);
+  assert.equal((await ctx.loom.getDraft(bead.key)).body.note, 'mine plus typed', 'the draft still keeps what was typed');
+});
+
+test('an outside render arriving while a draft write is in flight never replaces the typed body', async () => {
+  const ctx = await context();
+  const bead = await makeBead(ctx.loom, { note: 'original' });
+  const root = fakeRoot([field('text', 'typed but not yet stored')]);
+  const editor = await mountEditor(root, ctx, { key: bead.key });
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const realSaveDraft = ctx.loom.saveDraft;
+  ctx.loom.saveDraft = async (...args) => { await gate; return realSaveDraft(...args); };  // holds the write open
+  await root.fire('input', root.fields[0]);
+  const flushing = editor.flush();      // starts the (now gated) draft write
+  await editor.render();                // an outside render (another tab, or the end of a Send) arrives mid-write
+  assert.match(root.innerHTML, />typed but not yet stored<\/textarea>/);
+  release();
+  await flushing;
+  assert.equal((await ctx.loom.getDraft(bead.key)).body.note, 'typed but not yet stored');
+});
+
 test('an annotation opens read-only; a record waiting to be deleted offers undo', async () => {
   const ctx = await context();
   await ctx.store.putRecord({ key: 'com.cultureblocs.annotation/a1', type: 'com.cultureblocs.annotation', day: '2026-09-14', body: { note: 'on the wall' } });

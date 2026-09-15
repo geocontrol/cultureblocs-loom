@@ -112,11 +112,15 @@ export async function mountEditor(root, ctx, { key, day = '' }) {
   /* Draft writes run one after another; `draftWrite` is the last one. */
   function writeDraft() {
     saveTimer = null;
+    // Marked synchronously, before the write even starts: an outside render()
+    // (another tab's broadcast, the end of a Send) must never replace a body
+    // that has unwritten or in-flight edits — waiting until the write resolves
+    // would leave a gap where the guard sees neither a timer nor a dirty draft.
+    state.dirtyDraft = true;
     const body = structuredClone(state.body), against = base;
     draftWrite = draftWrite.then(async () => {
       try {
         await ctx.loom.saveDraft(key, body, against, record ? null : type);
-        state.dirtyDraft = true;
         if (!saveTimer) ctx.setDirty(false);
         if (!record) ctx.desk?.refreshColumn?.();                 // a new draft appears in the list
       } catch (err) {
@@ -262,11 +266,14 @@ export async function mountEditor(root, ctx, { key, day = '' }) {
       ctx.navigate(`#/day/${record.day || ''}`);
       return;
     }
-    if (action === 'undo-delete') { await ctx.loom.undoRemove(key); return reload(); }
-    if (action === 'keep-mine') { await keepMine(ctx.store, key); return reload(); }
+    // Flush any pending draft first: what was just typed lands in the draft before
+    // these replace or discard the record, so it is never lost to the 500ms debounce.
+    if (action === 'undo-delete') { await flush(); await ctx.loom.undoRemove(key); return reload(); }
+    if (action === 'keep-mine') { await flush(); await keepMine(ctx.store, key); return reload(); }
     if (action === 'take-theirs') {
       if (!state.armTheirs) { state.armTheirs = true; return render(); }   // two presses: Loom's version is replaced
       state.armTheirs = false;
+      await flush();
       await takeTheirs(ctx.store, key, { registry: ctx.registry, now: ctx.now });
       state.dirtyDraft = false;                    // the String's version shows; a draft stays stored, and restores next time
       return reload();
