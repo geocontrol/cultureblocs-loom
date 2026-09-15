@@ -19,6 +19,7 @@ test('only Loom-made records without a String id are unsent', () => {
   assert.equal(isUnsent({ sourceApp: 'loom' }), true);
   assert.equal(isUnsent({ sourceApp: 'loom', stringId: 'x' }), false);
   assert.equal(isUnsent({ sourceApp: 'scrobbler' }), false);
+  assert.equal(isUnsent({ sourceApp: 'loom', state: 'draft' }), false, 'a draft is not waiting to be sent');
 });
 
 test('dayString wraps strand members, keeps loose items, orders by earliest time', () => {
@@ -47,4 +48,12 @@ test('released tombstones are not shown: no count, no entry, not a strand member
   assert.deepEqual(monthDays([kept, gone]), [{ day: '2026-09-14', count: 1, unsent: 1 }]);
   assert.deepEqual(dayString([kept, gone, s]).map((e) => [e.record.key, (e.members || []).map((m) => m.key)]),
     [['b/k', []], ['s/1', []]]);
+});
+
+test('a bead claimed by two strands on one day appears inside both, and not loose', () => {
+  const a = rec('b/a', B, '2026-09-14T08:00:00Z');
+  const s1 = rec('s/1', S, '2026-09-14T20:00:00Z', { body: { items: [{ uri: 'loom://b/a' }] } });
+  const s2 = rec('s/2', S, '2026-09-14T21:00:00Z', { body: { items: [{ uri: 'loom://b/a' }] } });
+  assert.deepEqual(dayString([a, s1, s2]).map((e) => [e.kind, e.record.key, e.members.map((m) => m.key)]),
+    [['strand', 's/1', ['b/a']], ['strand', 's/2', ['b/a']]]);
 });

@@ -1,5 +1,6 @@
 /* Compose: the editor for a strand (an entry) or a bead. Pure: html from the
  * editor state, and the reverse mapping from form fields to a record body. */
+import { isAbandonable } from '../lib/envelope.js';
 import { itemUri, keyFromItemUri } from '../lib/keys.js';
 import { nameFromUri } from '../lib/media.js';
 import { html } from './html.js';
@@ -19,9 +20,10 @@ export function parseLinks(text) {
   });
 }
 
-/* state: { record, body, problems, conflict, dayBeads, urls, saving } */
+/* state: { record, body, problems, conflict, dayBeads, urls, restoredDraftAt, discardArmed } */
 export function composeView(state) {
-  const { record, body, problems = [], conflict = null, dayBeads = [], urls = new Map() } = state;
+  const { record, body, problems = [], conflict = null, dayBeads = [], urls = new Map(),
+    restoredDraftAt = null, discardArmed = false } = state;
   const isStrand = record.type === STRAND;
   const text = isStrand ? body.narrative || '' : body.note || '';
   const included = new Set((body.items || []).map((it) => keyFromItemUri(it.uri)));
@@ -32,6 +34,7 @@ export function composeView(state) {
         <span class="state chip">${record.state}</span>
         ${record.origin === 'mint' ? html`<span class="chip" title="minted ${record.createdAt}">mint fact</span>` : ''}
       </header>
+      ${restoredDraftAt ? html`<p class="restored">restored an unsaved draft from ${restoredDraftAt.replace('T', ' ').slice(0, 16)}</p>` : ''}
       ${conflict ? html`<div class="conflict">Another tab saved this ${conflict.updatedAt}.
         <button type="button" data-action="take-theirs">use theirs</button>
         <button type="button" data-action="keep-mine">keep mine</button></div>` : ''}
@@ -71,7 +74,9 @@ export function composeView(state) {
       <footer>
         <button type="button" class="primary" data-action="save" ${problems.length ? 'disabled' : ''}>save</button>
         ${isStrand && record.state === 'draft' ? html`<button type="button" data-action="finish" ${problems.length ? 'disabled' : ''}>save as told</button>` : ''}
-        <button type="button" data-action="discard">discard changes</button>
+        ${isAbandonable(record)
+          ? html`<button type="button" data-action="discard">${discardArmed ? 'discard this draft? press again to delete it' : 'discard this draft'}</button>`
+          : html`<button type="button" data-action="discard">discard changes</button>`}
         <a href="#/thread/${record.day || ''}">back to the day</a>
       </footer>
     </form>`;

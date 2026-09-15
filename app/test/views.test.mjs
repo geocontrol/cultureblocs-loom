@@ -86,8 +86,9 @@ test('compose round-trips a strand and a bead through its fields', () => {
   assert.match(out, /include<\/button>/);
 });
 
-test('panelView shows counts and disables send when nothing is unsent', () => {
-  const out = String(panelView({ unsent: 0, localChanges: 2, persisted: false }));
+test('panelView shows counts and disables send when nothing is sendable', () => {
+  const out = String(panelView({ unsent: 1, sendable: 0, drafts: 2, localChanges: 2, persisted: false }));
+  assert.match(out, /2 drafts not sent/);
   assert.match(out, /data-action="send" disabled/);
   assert.match(out, /2 local changes/);
   assert.match(out, /not marked persistent/);

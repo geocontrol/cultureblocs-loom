@@ -1,5 +1,5 @@
 /* Thread controller: month and day, keep and release. */
-import { dayString, isUnsent, monthDays } from '../lib/day.js';
+import { dayString, isLoomOnly, monthDays } from '../lib/day.js';
 import { mediaNames } from '../lib/media.js';
 import { backupReminder, dayView, monthView } from './view-thread.js';
 
@@ -19,7 +19,7 @@ export async function mountThread(root, ctx, { period }) {
     const dayRecords = records.filter((r) => r.day === period);
     const entries = dayString(dayRecords, records);
     const names = [...dayRecords, ...entries.flatMap((e) => e.members || [])].flatMap((r) => mediaNames(r.body));
-    const reminder = backupReminder({ unsent: records.filter(isUnsent).length,
+    const reminder = backupReminder({ unsent: records.filter(isLoomOnly).length,   // drafts too: they live only here
       lastBackupAt: await ctx.store.getMeta('lastBackupAt'), now: ctx.now() });
     root.innerHTML = String(dayView(entries, { day: period, urls: await ctx.photoUrls(names), reminder }));
   }

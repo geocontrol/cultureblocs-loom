@@ -21,8 +21,9 @@ export function panelView(s) {
 
       <h3>Send</h3>
       <p>${s.unsent} Loom-made record${s.unsent === 1 ? '' : 's'} not yet on the String.
+        ${s.drafts ? html`${s.drafts} draft${s.drafts === 1 ? '' : 's'} not sent (drafts stay here until saved as told).` : ''}
         ${s.localChanges ? html`${s.localChanges} local change${s.localChanges === 1 ? '' : 's'} to records already there wait for sync (Phase 2).` : ''}</p>
-      <button type="button" data-action="send" ${s.busy || !s.unsent ? 'disabled' : ''}>send</button>
+      <button type="button" data-action="send" ${s.busy || !s.sendable ? 'disabled' : ''}>send</button>
       ${s.sendResults?.length ? html`<ul class="result">${s.sendResults.map((r) => html`<li>${r.status}: ${r.key}${r.reason ? ` — ${r.reason}` : ''}${r.problems ? ` — ${r.problems.join('; ')}` : ''}</li>`)}</ul>` : ''}
 
       <h3>Backup</h3>

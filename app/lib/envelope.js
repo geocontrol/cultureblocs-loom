@@ -28,6 +28,9 @@ export class Conflict extends Error {
   }
 }
 
+export const isAbandonable = (r) =>
+  r?.type === STRAND && r.state === 'draft' && r.origin === 'compose' && !r.stringId;
+
 const randomDeviceId = () => `loom-${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}`;
 
 export async function openLoom({ store, registry, now = () => Date.now(), newDeviceId = randomDeviceId, nowMicros }) {
@@ -124,8 +127,17 @@ export async function openLoom({ store, registry, now = () => Date.now(), newDev
       else await store.deleteRecord(key);
       await store.deleteMeta(`draft:${key}`);
     },
-    /* Unsaved edits to an existing record survive reloads here until saved or discarded. */
-    saveDraft: (key, body) => store.setMeta(`draft:${key}`, { body, at: iso() }),
+    /* An entry started in Compose and never told: discarding it deletes it. */
+    async abandon(key) {
+      const current = await store.getRecord(key);
+      if (!isAbandonable(current)) throw new Error('only an entry still in draft, never sent, can be discarded');
+      await store.deleteRecord(key);
+      await store.deleteMeta(`draft:${key}`);
+    },
+    /* Unsaved edits to an existing record survive reloads here until saved or
+     * discarded. `baseUpdatedAt` is the record's updatedAt the edits were typed
+     * against, so saving a restored draft over a newer record is a Conflict. */
+    saveDraft: (key, body, baseUpdatedAt) => store.setMeta(`draft:${key}`, { body, at: iso(), baseUpdatedAt }),
     getDraft: (key) => store.getMeta(`draft:${key}`),
     discardDraft: (key) => store.deleteMeta(`draft:${key}`),
   };

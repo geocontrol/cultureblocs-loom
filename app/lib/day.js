@@ -5,7 +5,11 @@ import { keyFromItemUri } from './keys.js';
 
 const STRAND = 'com.cultureblocs.strand';
 
-export const isUnsent = (r) => r.sourceApp === 'loom' && !r.stringId;
+/* Made in Loom and not on the String: lives only in this browser. */
+export const isLoomOnly = (r) => r.sourceApp === 'loom' && !r.stringId;
+
+/* Waiting to be sent: Loom-only and finished. A draft stays home until told. */
+export const isUnsent = (r) => isLoomOnly(r) && r.state !== 'draft';
 
 /* A released proposal the String still holds: kept locally as a tombstone, never shown. */
 export const isReleased = (r) => r.state === 'released';

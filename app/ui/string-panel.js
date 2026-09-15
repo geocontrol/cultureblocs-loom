@@ -1,9 +1,9 @@
 /* String panel controller: settings, check, import, send, backup, restore. */
 import { contentHash } from '../vendor/strip.js';
 import { checkBackup, exportBackup, restoreBackup } from '../lib/backup.js';
-import { isUnsent } from '../lib/day.js';
+import { isLoomOnly, isUnsent } from '../lib/day.js';
 import { runImport } from '../lib/importer.js';
-import { runSend } from '../lib/sender.js';
+import { planSend, runSend } from '../lib/sender.js';
 import { stringClient } from '../lib/string-client.js';
 import { panelView } from './view-panel.js';
 
@@ -29,6 +29,8 @@ export async function mountPanel(root, ctx) {
       lastBackupAt: await ctx.store.getMeta('lastBackupAt'),
       posture: await ctx.store.getMeta('posture'),
       unsent: records.filter(isUnsent).length,
+      drafts: records.filter((r) => isLoomOnly(r) && r.state === 'draft').length,
+      sendable: planSend(records).ready.length,
       localChanges: await localChangeCount(records),
       persisted: await ctx.persisted(),
     });
@@ -104,7 +106,7 @@ export async function mountPanel(root, ctx) {
         checkBackup(doc);
         const here = await ctx.store.allRecords();
         s.pendingRestore = { doc, fileName: file.name, records: here.length, incoming: doc.records.length,
-          unsent: here.filter((r) => r.sourceApp === 'loom' && !r.stringId).length };
+          unsent: here.filter(isLoomOnly).length };
       } catch (err) { s.importResult = `not restored: ${err.message}`; }
       await render();
     }

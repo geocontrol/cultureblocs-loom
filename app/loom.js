@@ -27,6 +27,7 @@ async function boot() {
     fetch: (...a) => fetch(...a),
     broadcast: (kind = 'changed') => channel?.postMessage(kind),
     reload: () => location.reload(),
+    navigate: (hash) => { location.hash = hash; },
     setDirty: (d) => { dirty = d; },
     async persisted() { return (await navigator.storage?.persisted?.()) ?? false; },
     async photoUrls(names) {
@@ -72,6 +73,7 @@ async function boot() {
     }
     if (surface === 'compose' && arg === 'new') {
       const strand = await newStrand(ctx, { day: params.get('day'), wrap: params.get('wrap') });
+      ctx.broadcast();
       location.replace(`#/compose/${strand.key}`);
       return;
     }

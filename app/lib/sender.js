@@ -14,7 +14,7 @@
  * older one, from a send whose response was lost), so the hashes come from
  * what the String holds, fetched, not from what was just posted. */
 import { contentHash } from '../vendor/strip.js';
-import { isUnsent } from './day.js';
+import { isLoomOnly } from './day.js';
 import { keyFromItemUri, spineUri, toLoomItems } from './keys.js';
 import { hashFromName, mediaNames } from './media.js';
 
@@ -23,7 +23,7 @@ const STRAND = 'com.cultureblocs.strand';
 /* { ready: [envelope], held: [{ key, reason }] } — pure. */
 export function planSend(records) {
   const byKey = new Map(records.map((r) => [r.key, r]));
-  const unsent = records.filter(isUnsent).sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+  const unsent = records.filter(isLoomOnly).sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
   const ready = [], held = [];
   const going = new Set();
   for (const r of unsent.filter((r) => r.type !== STRAND)) {

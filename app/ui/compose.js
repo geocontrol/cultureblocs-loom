@@ -1,12 +1,14 @@
 /* Compose controller: edit a strand or a bead. Typing updates the problems
  * list and publish hints in place (a full re-render would steal focus);
- * structural actions re-render. Every change autosaves as a draft; Save goes
- * through the envelope's validation gate. */
+ * structural actions re-render. Every change autosaves as a draft (with the
+ * updatedAt it was typed against); Save goes through the envelope's validation
+ * gate, after any draft write in flight, so no draft outlives the save. */
 import { reanchor, selectionToIndex } from '../lib/anchors.js';
-import { Conflict, STRAND } from '../lib/envelope.js';
+import { Conflict, STRAND, isAbandonable } from '../lib/envelope.js';
 import { preparePhoto } from '../lib/images.js';
 import { itemUri } from '../lib/keys.js';
 import { mediaNames, putPhoto } from '../lib/media.js';
+import { html } from './html.js';
 import { bodyFromFields, composeView, problemsView } from './view-compose.js';
 import { publishHint, refFromFields } from './view-refs.js';
 
@@ -29,10 +31,17 @@ const textField = (type) => (type === STRAND ? 'narrative' : 'note');
 
 export async function mountCompose(root, ctx, { key }) {
   let record = await ctx.store.getRecord(key);
-  if (!record) { root.textContent = `No record ${key}.`; return { unmount() {} }; }
+  if (!record) { root.textContent = `No record ${key}.`; return { render() {}, async flush() {}, unmount() {} }; }
   const draft = await ctx.loom.getDraft(key);
-  const state = { record, body: structuredClone(draft?.body ?? record.body), conflict: null, dayBeads: [], urls: new Map() };
+  const state = { record, body: structuredClone(draft?.body ?? record.body), conflict: null, dayBeads: [], urls: new Map(),
+    restoredDraftAt: draft?.at ?? null, discardArmed: false };
+  // The updatedAt the body in the editor was typed against. For a restored draft
+  // it is the draft's own, so saving it over a record changed since is a Conflict;
+  // a draft written before drafts carried one (null) always asks.
+  let base = draft ? (draft.baseUpdatedAt ?? null) : record.updatedAt;
   let saveTimer = null;
+  let draftWrite = Promise.resolve();
+  let gone = false;
 
   const text = () => state.body[textField(record.type)] || '';
 
@@ -45,6 +54,7 @@ export async function mountCompose(root, ctx, { key }) {
   function problems() { return ctx.loom.validate(record.type, state.body); }
 
   async function render() {
+    if (gone) return;
     await loadContext();
     root.innerHTML = String(composeView({ ...state, record, problems: problems() }));
   }
@@ -60,13 +70,34 @@ export async function mountCompose(root, ctx, { key }) {
     });
   }
 
+  /* Draft writes run one after another; `draftWrite` is the last one. */
+  function writeDraft() {
+    saveTimer = null;
+    const body = structuredClone(state.body), against = base;
+    draftWrite = draftWrite.then(async () => {
+      await ctx.loom.saveDraft(record.key, body, against);
+      if (!saveTimer) ctx.setDirty(false);
+    });
+    return draftWrite;
+  }
+
   function scheduleDraft() {
     ctx.setDirty(true);
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      await ctx.loom.saveDraft(record.key, state.body);
-      ctx.setDirty(false);
-    }, 500);
+    saveTimer = setTimeout(writeDraft, 500);
+  }
+
+  /* Write a pending draft now (before an unmount or a reload). */
+  async function flush() {
+    if (saveTimer) { clearTimeout(saveTimer); writeDraft(); }
+    await draftWrite;
+  }
+
+  /* Drop a pending draft and wait out one in flight, so it cannot land after what follows. */
+  async function settleDrafts() {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    await draftWrite;
   }
 
   function readFields() {
@@ -92,12 +123,14 @@ export async function mountCompose(root, ctx, { key }) {
     refreshInPlace();
   }
 
-  async function save({ finish = false, expectUpdatedAt = record.updatedAt } = {}) {
-    clearTimeout(saveTimer);
+  async function save({ finish = false, expectUpdatedAt = base } = {}) {
+    await settleDrafts();
     try {
       record = await ctx.loom.save(record.key, state.body, { expectUpdatedAt });
       if (finish) record = await ctx.loom.finish(record.key);
+      base = record.updatedAt;
       state.conflict = null;
+      state.restoredDraftAt = null;
       ctx.setDirty(false);
       ctx.broadcast();
     } catch (e) {
@@ -107,26 +140,46 @@ export async function mountCompose(root, ctx, { key }) {
     await render();
   }
 
+  /* Back to what is stored: no draft, nothing pending. */
+  async function revertTo(stored) {
+    await settleDrafts();
+    await ctx.loom.discardDraft(stored.key);
+    record = stored;
+    base = stored.updatedAt;
+    state.body = structuredClone(stored.body);
+    Object.assign(state, { conflict: null, restoredDraftAt: null });
+    ctx.setDirty(false);
+    await render();
+  }
+
   async function onClick(e) {
     const button = e.target.closest?.('button[data-action]');
     if (!button) return;
     const action = button.dataset.action;
+    if (action !== 'discard') state.discardArmed = false;
     const refIndex = Number(button.closest('[data-ref]')?.dataset.ref);
     const itemIndex = Number(button.closest('[data-item]')?.dataset.item);
     const items = state.body.items || [];
     if (action === 'save') return save();
     if (action === 'finish') return save({ finish: true });
     if (action === 'keep-mine') return save({ expectUpdatedAt: state.conflict.updatedAt });
-    if (action === 'take-theirs') {
-      record = state.conflict;
-      state.body = structuredClone(record.body);
-      state.conflict = null;
-      await ctx.loom.discardDraft(record.key);
-    } else if (action === 'discard') {
-      await ctx.loom.discardDraft(record.key);
-      record = await ctx.store.getRecord(record.key);
-      state.body = structuredClone(record.body);
-    } else if (action === 'add-ref') {
+    if (action === 'take-theirs') return revertTo(state.conflict);
+    if (action === 'discard') {
+      if (!isAbandonable(record)) return revertTo(await ctx.store.getRecord(record.key));
+      if (!state.discardArmed) {          // two presses: a discarded draft entry is gone
+        state.discardArmed = true;
+        return render();
+      }
+      await settleDrafts();
+      await ctx.loom.abandon(record.key);
+      gone = true;
+      ctx.setDirty(false);
+      ctx.broadcast();
+      root.innerHTML = String(html`<p>Draft discarded. <a href="#/thread/${record.day || ''}">back to the day</a></p>`);
+      ctx.navigate?.(`#/thread/${record.day || ''}`);
+      return;
+    }
+    if (action === 'add-ref') {
       state.body.refs = [...(state.body.refs || []), { type: 'work', role: 'subject', descriptor: { label: '' } }];
     } else if (action === 'remove-ref') {
       state.body.refs.splice(refIndex, 1);
@@ -175,10 +228,12 @@ export async function mountCompose(root, ctx, { key }) {
   await render();
   return {
     render,
+    flush,
     unmount() {
       root.removeEventListener('input', onInput);
       root.removeEventListener('click', onClick);
       root.removeEventListener('change', onChange);
+      return flush();
     },
   };
 }

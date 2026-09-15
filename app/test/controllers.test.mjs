@@ -12,6 +12,8 @@ import { mountThread } from '../ui/thread.js';
 import { BACKUP_TYPE } from '../lib/backup.js';
 import { registry, steppingNow } from './helpers.mjs';
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 function fakeRoot() {
   const listeners = {};
   return {
@@ -103,4 +105,93 @@ test('restore asks first, naming what it replaces, then restores and reloads eve
   assert.equal(await ctx.store.getRecord(mine.key), undefined);
   assert.deepEqual(events.filter((e) => !e.startsWith('download')), ['broadcast restored', 'reload']);
   assert.ok(events[0].startsWith('download loom-backup-'));
+});
+
+test('a draft restored over a record saved since then shows the conflict instead of saving over it', async () => {
+  const ctx = await context();
+  const bead = await ctx.loom.mint({ note: 'original' });
+  await ctx.loom.save(bead.key, { ...bead.body, note: 'saved in another tab' });
+  await ctx.loom.saveDraft(bead.key, { ...bead.body, note: 'my old draft' }, bead.updatedAt);   // typed against the original
+  const root = fakeRoot();
+  await mountCompose(root, ctx, { key: bead.key });
+  assert.match(root.innerHTML, /restored an unsaved draft from/);
+  assert.match(root.innerHTML, /my old draft/);
+  await root.fire('click', button('save'));
+  assert.match(root.innerHTML, /Another tab saved this/);
+  assert.equal((await ctx.store.getRecord(bead.key)).body.note, 'saved in another tab');
+});
+
+test('discarding changes leaves no draft behind, and the editor is clean', async () => {
+  const ctx = await context();
+  const dirty = [];
+  ctx.setDirty = (d) => dirty.push(d);
+  const bead = await ctx.loom.mint({ note: 'x' });
+  const root = fakeRoot();
+  await mountCompose(root, ctx, { key: bead.key });
+  await root.fire('click', button('add-ref'));
+  await root.fire('click', button('discard'));
+  await sleep(600);
+  assert.equal(await ctx.loom.getDraft(bead.key), undefined);
+  assert.equal(dirty.at(-1), false);
+});
+
+test('saving while a draft write is in flight leaves no orphan draft', async () => {
+  const ctx = await context();
+  const bead = await ctx.loom.mint({ note: 'Saw Crash' });
+  await ctx.loom.save(bead.key, { ...bead.body, refs: [{ type: 'work', role: 'subject', descriptor: { label: 'Crash' } }] });
+  let open, reached;
+  const opened = new Promise((r) => { open = r; });
+  const arrived = new Promise((r) => { reached = r; });
+  const saveDraft = ctx.loom.saveDraft;
+  ctx.loom = { ...ctx.loom, async saveDraft(...a) { reached(); await opened; return saveDraft(...a); } };
+  const root = fakeRoot();
+  await mountCompose(root, ctx, { key: bead.key });
+  await root.fire('click', button('remove-ref', {}, { '[data-ref]': { dataset: { ref: '0' } } }));
+  await arrived;                                  // the debounced draft write has started
+  const saving = root.fire('click', button('save'));
+  await Promise.race([saving, sleep(50)]);        // a save that does not wait for the draft is done by now
+  open();                                         // ...and only then does the draft write land
+  await saving;
+  await sleep(10);
+  assert.equal(await ctx.loom.getDraft(bead.key), undefined);
+  assert.equal('refs' in (await ctx.store.getRecord(bead.key)).body, false);
+});
+
+test('flush writes a pending draft at once, with the updatedAt it was typed against', async () => {
+  const ctx = await context();
+  const bead = await ctx.loom.mint({ note: 'x' });
+  const root = fakeRoot();
+  const c = await mountCompose(root, ctx, { key: bead.key });
+  await root.fire('click', button('add-ref'));
+  await c.flush();
+  const draft = await ctx.loom.getDraft(bead.key);
+  assert.equal(draft.baseUpdatedAt, bead.updatedAt);
+  assert.equal(draft.body.refs.length, 1);
+  c.unmount();
+});
+
+test('discard on a draft entry never told deletes it, on the second press', async () => {
+  const ctx = await context();
+  const bead = await ctx.loom.mint({ note: 'x' });
+  const strand = await newStrand(ctx, { day: bead.day, wrap: bead.key });
+  await ctx.loom.saveDraft(strand.key, strand.body, strand.updatedAt);
+  const root = fakeRoot();
+  await mountCompose(root, ctx, { key: strand.key });
+  assert.match(root.innerHTML, /data-action="discard">discard this draft/);
+  await root.fire('click', button('discard'));
+  assert.ok(await ctx.store.getRecord(strand.key), 'one press does not delete');
+  await root.fire('click', button('discard'));
+  assert.equal(await ctx.store.getRecord(strand.key), undefined);
+  assert.equal(await ctx.loom.getDraft(strand.key), undefined);
+  assert.ok(await ctx.store.getRecord(bead.key), 'the bead it wrapped is untouched');
+});
+
+test('the panel counts drafts apart from unsent records, and send is off when nothing is sendable', async () => {
+  const ctx = await context();
+  await newStrand(ctx, { day: '2026-09-15' });
+  const root = fakeRoot();
+  await mountPanel(root, ctx);
+  assert.match(root.innerHTML, /0 Loom-made records not yet on the String/);
+  assert.match(root.innerHTML, /1 draft not sent/);
+  assert.match(root.innerHTML, /data-action="send" disabled/);
 });
