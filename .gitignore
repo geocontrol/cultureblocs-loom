@@ -28,3 +28,6 @@ Thumbs.db
 .env
 .env.*
 docker-compose.override.yml
+
+# --- superpowers scratch (brainstorm mockups, SDD ledgers) ---
+.superpowers/
