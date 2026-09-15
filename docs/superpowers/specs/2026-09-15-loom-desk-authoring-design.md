@@ -1,6 +1,6 @@
 # Loom desk authoring — one environment to write and manage the String: design
 
-Status: approved in brainstorming 2026-09-15; awaiting review of this document.
+Status: approved 2026-09-15. Corrected 2026-09-15 from the implementation prototype (see §12).
 Builds on: [Phase 1 design](2026-09-14-loom-phase1-design.md) (the shipped app in `app/`, merged in PR #2).
 Parent design: [`LOOM.md`](../../../LOOM.md) — §3 is revised by this document (§11 below).
 Code lands in **this repository** under `app/`, after two small changes in **cultureblocs-string** (§8).
@@ -317,3 +317,54 @@ copy of the database (never `data/string.db`, never :8100):
   authoring*, noting Send now carries edits, state and deletes ahead of
   Phase 2 sync.
 - **§11** open questions: close "no timeline on the phone".
+
+## 12 · Corrections from the prototype (2026-09-15)
+
+The plan's code was built and run end to end before the plan was written.
+Where it differs from the sections above, this section is the design.
+
+- **Files.** The pure views are `ui/view-string.js` (String column),
+  `ui/view-bead.js`, `ui/view-strand.js`, `ui/view-form.js` (what both forms
+  share: fields to body, photos, provenance, footer, read-only) and
+  `ui/view-panels.js` (day, delete confirmation, deleted record, conflict,
+  top bar, Send page, settings). The controllers are `ui/string.js`,
+  `ui/editor.js` (one controller for both forms, new and existing),
+  `ui/pages.js` (top bar, Send page, day page, `sendAll`) and
+  `ui/settings.js`. `lib/routing.js` keeps only the route serialiser.
+- **Drafts of new records** live under `draft:<key>` like any draft, with
+  the record's `type` stored in the draft; `loom.newDrafts()` lists the
+  ones with no record yet. `#/new/bead` and `#/new/strand` reserve a key
+  and replace themselves with `#/edit/<key>`, so a reload keeps the draft.
+- **Envelope API.** `newKey(type)`, `createBead(key, body, { timeAnchored })`,
+  `createStrand(key, body)`, `save`, `keep`, `remove(key)` → keys of the
+  strands changed, `undoRemove`, `strandsUsing`, `saveDraft(key, body,
+  baseUpdatedAt, type)`, `newDrafts`. A strand losing a deleted bead is
+  rewritten with its state untouched. Saving a Phase 1 `draft` strand that
+  never reached the String keeps it; a `draft` from the String stays a
+  draft.
+- **`stringMedia`** joins `stringHlc` and `stringKeys`: the photos the
+  String's copy uses, so a PATCH uploads only new ones.
+- **Import** also refreshes `stringHlc`, `stringKeys` and `stringMedia`
+  on a record that is unchanged but was restamped on the String (a
+  publish restamps without changing the body).
+- **Send** fetches the String's record after every POST, for its hlc. A
+  PATCH or state change answered 404 is a conflict with nothing on the
+  String's side; a delete taken back while its DELETE was on its way is
+  the same. Keep mine on such a record posts it again under its own
+  `sourceApp`.
+- **Place.** The forms edit a place's name. A place's other parts (DID,
+  coordinates) are kept as they are and shown, not edited; coordinates
+  carry a fuzzing duty (defs#geo) that a free form should not take on.
+- **Send results** show on the Send page (`#/send`), which the top bar's
+  Send opens, with the waiting changes and "undo delete".
+- **The entry list** renders every day and scrolls the column to the
+  selected day; no paging was needed for a String of a few hundred records.
+- **Release** in the String column asks with a second press, as Phase 1 did.
+- **Another tab's save** while a form is open is shown in the form's
+  status line with "use the newer version" and "save mine over it",
+  separately from a String conflict.
+- **Confirmations.** Delete asks in a panel below the form; release (in
+  the column) and "take the String's" (in the conflict view) ask with a
+  second press. "Keep mine" does not ask: nothing is lost by it.
+- **A failed write** shows the browser's own message in the form's status
+  line ("draft not saved: …" for a draft), and the form keeps what was typed.
