@@ -45,7 +45,7 @@ export function refsView(refs, text) {
           </div>
           <label>ids, one per line as scheme:id <textarea name="externalIds" rows="2">${idsText(ref.externalIds)}</textarea></label>
           <div class="row anchor">
-            ${covered ? html`anchored to "${covered}" <button type="button" data-action="clear-anchor">clear anchor</button>`
+            ${covered ? html`anchored to “${covered}” <button type="button" data-action="clear-anchor">clear anchor</button>`
               : html`<button type="button" data-action="anchor">anchor to selected text</button>`}
             <button type="button" data-action="remove-ref">remove</button>
           </div>

@@ -67,7 +67,7 @@ test('refFromFields reads a row, parses ids, keeps the anchor', () => {
     did: '', externalIds: 'viaf: 96999624\nnot-an-id\nwikidata:Q181659' }, { index: { byteStart: 0, byteEnd: 6 } });
   assert.deepEqual(ref, { type: 'person', role: 'mention', descriptor: { label: 'Ursula K. Le Guin' },
     externalIds: [{ scheme: 'viaf', id: '96999624' }, { scheme: 'wikidata', id: 'Q181659' }], index: { byteStart: 0, byteEnd: 6 } });
-  assert.match(String(refsView([ref], 'Ursula wrote')), /anchored to "Ursula"/);
+  assert.match(String(refsView([ref], 'Ursula wrote')), /anchored to “Ursula”/);
 });
 
 test('compose round-trips a strand and a bead through its fields', () => {
