@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { planImport, runImport } from '../lib/importer.js';
 import { createMemStore } from '../lib/memstore.js';
 import { mediaName, sha256Hex } from '../lib/media.js';
+import { migrateStore } from '../lib/migrate.js';
 import { contentHash } from '../vendor/strip.js';
 import { fakeString, photo } from './fake-string.mjs';
 import { openLoom } from '../lib/envelope.js';
@@ -97,7 +98,7 @@ test('keeping an imported proposal in Loom is a local change the String does not
   assert.equal((await store.getRecord(`${B}/u1`)).state, 'kept');
 });
 
-test('a record deleted in Loom is never re-added or updated by import', async () => {
+test('a record deleted in Loom is never re-added or updated by import; changed on the String it becomes a conflict', async () => {
   const s = fakeString({ records: [bead('u1', '5 tracks', { state: 'proposal', sourceApp: 'scrobbler' })] });
   const store = createMemStore();
   const reg = await registry();
@@ -105,13 +106,61 @@ test('a record deleted in Loom is never re-added or updated by import', async ()
   await runImport({ store, registry: reg, client: s.client });
   await loom.remove(`${B}/u1`);                                        // released: deleted on the next Send
   const again = await runImport({ store, registry: reg, client: s.client });
-  assert.deepEqual([again.counts.add, again.counts.update, again.counts.unchanged], [0, 0, 1]);
+  assert.deepEqual([again.counts.add, again.counts.update, again.counts.unchanged, again.conflicts.length], [0, 0, 1, 0]);
   s.records[0].body.note = '6 tracks';
   const changed = await runImport({ store, registry: reg, client: s.client });
-  assert.deepEqual([changed.counts.update, changed.conflicts.length], [0, 0]);
+  assert.deepEqual([changed.counts.update, changed.conflicts], [0, [`${B}/u1`]]);
   const local = await store.getRecord(`${B}/u1`);
-  assert.deepEqual([local.deleted, local.body.note, 'conflict' in local], [true, '5 tracks', false]);
+  assert.deepEqual([local.deleted, local.body.note, local.conflict.reason, local.conflict.theirs.body.note], [true, '5 tracks', 'import', '6 tracks']);
   assert.equal((await store.allRecords()).length, 1);
+});
+
+test('a local delete never wipes a String-side change: import then Send leaves the edited record on the String', async () => {
+  const s = fakeString({ records: [bead('u1', 'one')] });
+  const store = createMemStore();
+  const reg = await registry();
+  const loom = await openLoom({ store, registry: reg, now: steppingNow(), newDeviceId: () => 'desk-1' });
+  await runImport({ store, registry: reg, client: s.client });
+  await loom.remove(`${B}/u1`);
+  s.editOnString('u1', { note: 'edited on the String after Loom saw it' });
+  const { conflicts } = await runImport({ store, registry: reg, client: s.client });
+  assert.deepEqual(conflicts, [`${B}/u1`]);
+  assert.equal((await store.getRecord(`${B}/u1`)).stringHlc === s.records[0].hlc, false, 'the version Send deletes against is not refreshed');
+  const results = await runSend({ store, client: s.client });
+  assert.deepEqual(results.map((r) => [r.key, r.status]), [[`${B}/u1`, 'held']]);
+  assert.equal(s.records.length, 1);
+  assert.equal(s.records[0].body.note, 'edited on the String after Loom saw it');
+});
+
+test('a released Phase 1 proposal, kept and edited on the String, becomes a conflict on import, not a delete', async () => {
+  const s = fakeString({ records: [bead('p1', 'proposed', { state: 'proposal' })] });
+  const store = createMemStore();
+  const reg = await registry();
+  await runImport({ store, registry: reg, client: s.client });
+  const { stringHlc: _h, stringKeys: _k, stringMedia: _m, ...phase1 } = await store.getRecord(`${B}/p1`);
+  await store.putRecord({ ...phase1, state: 'released' });
+  await migrateStore(store);
+  s.editOnString('p1', { note: 'someone kept and edited' });
+  s.records[0].state = 'kept';
+  const { conflicts } = await runImport({ store, registry: reg, client: s.client });
+  assert.deepEqual(conflicts, [`${B}/p1`]);
+  await runSend({ store, client: s.client });
+  assert.deepEqual(s.records.map((r) => [r.id, r.state, r.body.note]), [['p1', 'kept', 'someone kept and edited']]);
+});
+
+test('a deleted record only restamped on the String stays unchanged and takes the new version', async () => {
+  const s = fakeString({ records: [bead('u1', 'one')] });
+  const store = createMemStore();
+  const reg = await registry();
+  const loom = await openLoom({ store, registry: reg, now: steppingNow(), newDeviceId: () => 'desk-1' });
+  await runImport({ store, registry: reg, client: s.client });
+  await loom.remove(`${B}/u1`);
+  s.records[0].hlc = '0000000000099-00000-fake';
+  const { counts, conflicts } = await runImport({ store, registry: reg, client: s.client });
+  assert.deepEqual([counts.unchanged, conflicts.length], [1, 0]);
+  assert.equal((await store.getRecord(`${B}/u1`)).stringHlc, '0000000000099-00000-fake');
+  assert.deepEqual((await runSend({ store, client: s.client })).map((r) => r.status), ['sent']);
+  assert.equal(s.records.length, 0);
 });
 
 test('a String edit to a record Loom made updates it like any other; a provenance change is a conflict', async () => {

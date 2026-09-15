@@ -5,8 +5,10 @@
  *   link       a record Loom sent (dedupeKey "loom:<rkey>") whose local copy
  *              lost its stringId, e.g. after restoring an older backup
  *   update     unchanged in Loom since the last import, changed on the String
- *   unchanged  the same on both sides — or deleted in Loom, waiting for Send
- *   conflict   changed on both sides, or its provenance changed on the String:
+ *   unchanged  the same on both sides — or deleted in Loom and unchanged on
+ *              the String, waiting for Send
+ *   conflict   changed on both sides (a delete in Loom counts as a change),
+ *              or its provenance changed on the String:
  *              the local record is kept and marked `conflict` with the String's
  *              version (`theirs`) for the person to choose (conflicts.js)
  * "Changed in Loom" compares the local body with `importedHash` (its hash as
@@ -34,10 +36,13 @@ export const stringFields = (rec) => ({ stringHlc: rec.hlc ?? null,
 
 /* The action for one String record against one local record (held under its stringId). */
 async function decide(rec, local) {
-  if (local.deleted) return 'unchanged';      // Send deletes it, or finds the String moved on
   const stringState = rec.state || 'kept';
   const bodyChanged = (await contentHash(rec.body)) !== local.stringHash;
   const stringChanged = bodyChanged || stringState !== local.importedState;
+  // Deleted in Loom: never re-added or updated. If the String changed it since,
+  // the person chooses — an 'unchanged' here would refresh `stringHlc` onto the
+  // tombstone, and Send's DELETE would then carry the new version and wipe the change.
+  if (local.deleted) return stringChanged ? 'conflict' : 'unchanged';
   if (!stringChanged) return 'unchanged';
   if (bodyChanged && !same(rec.body?.provenance, local.body?.provenance)) return 'conflict';   // provenance is fixed
   const loomChanged = (await contentHash(local.body)) !== local.importedHash || local.state !== local.importedState;

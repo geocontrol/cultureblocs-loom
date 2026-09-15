@@ -8,35 +8,41 @@
  * Photos upload before the record that uses them, unless the String already
  * has them (`stringMedia`).
  *
- * A bead's DELETE waits for every strand whose edit or delete dropped (or
- * still holds) that bead to reach the String first — envelope.js's `remove`
+ * A bead's DELETE waits while a strand may still list that bead. Locally:
+ * any strand not deleted whose items still name it (a "take the String's" on
+ * a strand can bring the item back). On the String: envelope.js's `remove`
  * rewrites a using strand's body locally before Send ever runs, so Loom's own
  * copy no longer says which bead an unresolved strand change concerned.
  * Rather than hold every bead delete on any unrelated strand trouble, Send
- * asks the String directly: for each strand (with a stringId) whose edit or
- * delete has not succeeded yet in this run, it fetches that strand's String
- * copy and holds the bead delete only if those `items` still name the bead —
- * a 404 (the strand is already gone) is not a reason to hold, but any other
- * fetch failure is, safely. A strand whose patch or delete already sent in
- * this run needs no fetch.
+ * asks the String directly: for each strand (with a stringId) that is in
+ * conflict, or whose edit or delete is pending and has not succeeded in this
+ * run, it fetches that strand's String copy and holds the bead delete only if
+ * those `items` still name the bead — a 404 (the strand is already gone) is
+ * not a reason to hold, but any other fetch failure is, safely, and the
+ * reason says the strand could not be checked.
  *
  * Every request is safe to repeat. A POST carries dedupeKey "loom:<rkey>". A
  * PATCH or DELETE carries If-Match with the version Loom last saw
  * (`stringHlc`): a 412 means the String moved on, so the record is marked
  * `conflict` with the String's version — unless the String already holds
- * exactly what was being sent, which is a success (a lost response). A DELETE
- * answered 404 is done. A record migrated from Phase 1 without `stringHlc`
- * fetches the String's copy first, and uses its version only if the body is
- * the one Loom last imported and its state has not moved either — a state
- * change alone (kept/published elsewhere) is also treated as stale.
+ * exactly what was being sent (the body, and the state the PATCH leaves),
+ * which is a success (a lost response). A DELETE answered 404 is done. A
+ * state change carries no If-Match, so Send fetches the String's copy first
+ * and changes the state only if it is still the version Loom last saw; if the
+ * answer's body is not the one Loom last imported, the String changed in
+ * between and the record is a conflict. A record migrated from Phase 1
+ * without `stringHlc` fetches the String's copy first, and uses its version
+ * only if the body is the one Loom last imported and its state has not moved
+ * either — a state change alone (kept/published elsewhere) is also treated as
+ * stale. (Between that GET and the write nothing protects it.)
  *
  * After each success the String's answer is recorded onto a fresh read of the
  * record, as an import would record it: an edit saved while the request was
  * in flight keeps its body and reads as a new change. */
 import { contentHash } from '../vendor/strip.js';
-import { pendingChanges } from './day.js';
+import { pendingChange, pendingChanges } from './day.js';
 import { stringFields } from './importer.js';
-import { keyFromItemUri, spineUri, toLoomItems } from './keys.js';
+import { itemUri, keyFromItemUri, spineUri, toLoomItems } from './keys.js';
 import { hashFromName, mediaNames } from './media.js';
 
 const BEAD = 'com.cultureblocs.bead';
@@ -82,14 +88,10 @@ export async function runSend({ store, client, now = () => Date.now(), onProgres
   const { ready, held } = await planSend(records);
   const results = held.map((h) => ({ key: h.key, status: 'held', reason: h.reason }));
 
-  // Strands (with a stringId) whose edit or delete was pending when this Send
-  // started: a bead delete checks the String through these, since one of them
-  // may be the strand that dropped (or still holds) that bead (see the header
-  // comment). A strand's fetched String copy is cached for the run.
-  const pendingAtStart = await pendingChanges(records);
-  const unresolvedStrands = new Set(records
-    .filter((r) => r.type === STRAND && r.stringId && ['edit', 'delete'].includes(pendingAtStart.get(r.key)))
-    .map((r) => r.key));
+  // A bead's DELETE is held while a strand may still list it (see the header
+  // comment). Strands sent successfully in this run need no check; a strand's
+  // fetched String copy is cached for the run.
+  const sentStrands = new Set();
   const strandItemsCache = new Map();
 
   async function stringItemsOf(strandKey, stringId) {
@@ -104,14 +106,18 @@ export async function runSend({ store, client, now = () => Date.now(), onProgres
     return items;
   }
 
-  /* The key of an unresolved strand whose String copy still names this bead
-   * (or could not be checked), or null if none does. */
-  async function strandStillListing(beadStringId) {
-    for (const strandKey of unresolvedStrands) {
-      const strand = await store.getRecord(strandKey);
-      if (!strand?.stringId) continue;
-      const items = await stringItemsOf(strandKey, strand.stringId);
-      if (items === 'unreachable' || (items && items.some((it) => it?.uri === spineUri(beadStringId)))) return strandKey;
+  /* Why a bead's DELETE must wait, or null. */
+  async function beadDeleteHold(bead) {
+    const strands = (await store.allRecords()).filter((r) => r.type === STRAND);
+    // A strand here still uses it — "take the String's" on a strand can bring the item back.
+    const using = strands.find((s) => !s.deleted && list(s.body?.items).some((it) => it?.uri === itemUri(bead.key)));
+    if (using) return `still in ${using.key}`;
+    for (const s of strands) {
+      if (!s.stringId || sentStrands.has(s.key)) continue;
+      if (!s.conflict && !['edit', 'delete'].includes(await pendingChange(s))) continue;
+      const items = await stringItemsOf(s.key, s.stringId);
+      if (items === 'unreachable') return `could not check ${s.key} on the String`;
+      if (items && items.some((it) => it?.uri === spineUri(bead.stringId))) return `${s.key} still lists it on the String`;
     }
     return null;
   }
@@ -176,8 +182,11 @@ export async function runSend({ store, client, now = () => Date.now(), onProgres
     if ((await contentHash(current.body)) !== env.stringHash || (current.state || 'kept') !== env.importedState) {
       return { stale: current };
     }
-    return { hlc: current.hlc, keys: Object.keys(current.body) };
+    return { hlc: current.hlc, keys: Object.keys(current.body), current };
   }
+
+  /* The state a PATCH leaves: editing a proposal keeps it, as the String does. */
+  const stateAfterPatch = (env) => (env.importedState === 'proposal' ? 'kept' : env.importedState);
 
   const ops = {
     async post(env) {
@@ -201,13 +210,28 @@ export async function runSend({ store, client, now = () => Date.now(), onProgres
       } catch (e) {
         if (e.status !== 412) throw e;
         const current = e.detail?.current;
-        if (!current || (await contentHash(current.body)) !== (await contentHash(body))) return markConflict(env.key, current ?? null);
+        // A lost response only if the String holds exactly what this PATCH would have
+        // left: the body sent, and the state it produces (not one moved elsewhere since).
+        if (!current || (await contentHash(current.body)) !== (await contentHash(body))
+          || (current.state || 'kept') !== stateAfterPatch(env)) return markConflict(env.key, current ?? null);
         await link(env.key, current);                         // the String already holds this edit
       }
       return { status: 'sent', stringId: env.stringId };
     },
     async state(env) {
-      await link(env.key, await client.setState(env.stringId, env.state));
+      // POST state carries no If-Match: check first that the String still holds the
+      // version Loom last saw (a revision or a publish elsewhere restamps it).
+      const known = await base(env);
+      if (known.stale) return markConflict(env.key, known.stale);
+      if (env.stringHlc) {
+        const current = known.current ?? await client.getRecord(env.stringId);
+        if (current.hlc !== env.stringHlc) return markConflict(env.key, current);
+      }
+      const rec = await client.setState(env.stringId, env.state);
+      // Changed in the gap between that check and the write: Loom's body was never
+      // sent, so recording the String's body as imported would read as a false edit.
+      if ((await contentHash(rec.body)) !== env.stringHash) return markConflict(env.key, rec);
+      await link(env.key, rec);
       return { status: 'sent', stringId: env.stringId };
     },
     async delete(env) {
@@ -235,10 +259,10 @@ export async function runSend({ store, client, now = () => Date.now(), onProgres
   for (const { op, key } of ready) {
     const env = await store.getRecord(key);                   // fresh: an earlier op may have set a member's stringId
     if (!env) continue;
-    if (op === 'delete' && env.type === BEAD && unresolvedStrands.size) {
-      const blocker = await strandStillListing(env.stringId);
-      if (blocker) {
-        const result = { key, op, status: 'held', reason: `${blocker} still lists it on the String` };
+    if (op === 'delete' && env.type === BEAD) {
+      const reason = await beadDeleteHold(env);
+      if (reason) {
+        const result = { key, op, status: 'held', reason };
         results.push(result);
         onProgress(result);
         continue;
@@ -260,7 +284,7 @@ export async function runSend({ store, client, now = () => Date.now(), onProgres
         result = { key, op, status: 'failed', reason: e.message };
       }
     }
-    if (env.type === STRAND && (op === 'patch' || op === 'delete') && result.status === 'sent') unresolvedStrands.delete(key);
+    if (env.type === STRAND && (op === 'patch' || op === 'delete') && result.status === 'sent') sentStrands.add(key);
     results.push(result);
     onProgress(result);
   }
