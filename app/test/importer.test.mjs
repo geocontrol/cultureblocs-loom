@@ -6,6 +6,7 @@ import { mediaName, sha256Hex } from '../lib/media.js';
 import { contentHash } from '../vendor/strip.js';
 import { fakeString, photo } from './fake-string.mjs';
 import { openLoom } from '../lib/envelope.js';
+import { runSend } from '../lib/sender.js';
 import { registry, steppingNow } from './helpers.mjs';
 
 const B = 'com.cultureblocs.bead', S = 'com.cultureblocs.strand';
@@ -72,6 +73,37 @@ test('keeping an imported proposal in Loom is a local change the String does not
   const { conflicts } = await runImport({ store, registry: reg, client: s.client });
   assert.deepEqual(conflicts, [`${B}/u1`]);
   assert.equal((await store.getRecord(`${B}/u1`)).state, 'kept');
+});
+
+test('a released proposal stays released on re-import, and a String change to it is a conflict', async () => {
+  const s = fakeString({ records: [bead('u1', '5 tracks', { state: 'proposal', sourceApp: 'scrobbler' })] });
+  const store = createMemStore();
+  const reg = await registry();
+  const loom = await openLoom({ store, registry: reg, now: steppingNow(), newDeviceId: () => 'desk-1' });
+  await runImport({ store, registry: reg, client: s.client });
+  await loom.release(`${B}/u1`);
+  const again = await runImport({ store, registry: reg, client: s.client });
+  assert.deepEqual([again.counts.add, again.counts.update, again.counts.unchanged], [0, 0, 1]);
+  assert.equal((await store.getRecord(`${B}/u1`)).state, 'released');
+  s.records[0].body.note = '6 tracks';
+  const changed = await runImport({ store, registry: reg, client: s.client });
+  assert.deepEqual(changed.conflicts, [`${B}/u1`]);
+  assert.equal((await store.getRecord(`${B}/u1`)).state, 'released');
+  assert.equal((await store.allRecords()).length, 1);
+});
+
+test('a String change to a mint fact is a conflict, never an update', async () => {
+  const store = createMemStore();
+  const reg = await registry();
+  const loom = await openLoom({ store, registry: reg, now: steppingNow(), newDeviceId: () => 'desk-1' });
+  const minted = await loom.mint({ note: 'as minted' });
+  const s = fakeString();
+  await runSend({ store, client: s.client });
+  s.records[0].body.note = 'rewritten on the String';
+  const { counts, conflicts } = await runImport({ store, registry: reg, client: s.client });
+  assert.deepEqual([counts.update, counts.conflict], [0, 1]);
+  assert.deepEqual(conflicts, [minted.key]);
+  assert.equal((await store.getRecord(minted.key)).body.note, 'as minted');
 });
 
 test('an invalid String record is imported and flagged, not dropped', async () => {

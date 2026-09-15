@@ -7,11 +7,14 @@ const STRAND = 'com.cultureblocs.strand';
 
 export const isUnsent = (r) => r.sourceApp === 'loom' && !r.stringId;
 
+/* A released proposal the String still holds: kept locally as a tombstone, never shown. */
+export const isReleased = (r) => r.state === 'released';
+
 /* [{ day, count, unsent }] newest first. */
 export function monthDays(records) {
   const days = new Map();
   for (const r of records) {
-    if (!r.day) continue;
+    if (!r.day || isReleased(r)) continue;
     const d = days.get(r.day) || { day: r.day, count: 0, unsent: 0 };
     d.count += 1;
     if (isUnsent(r)) d.unsent += 1;
@@ -23,8 +26,9 @@ export function monthDays(records) {
 /* A day's string: [{ kind: 'strand', record, members } | { kind: 'item', record }],
  * ordered by the earliest time in each entry. Members of a strand appear only
  * inside it. `allRecords` resolves members that were made on another day. */
-export function dayString(dayRecords, allRecords = dayRecords) {
-  const byKey = new Map(allRecords.map((r) => [r.key, r]));
+export function dayString(dayRecordsIn, allRecords = dayRecordsIn) {
+  const dayRecords = dayRecordsIn.filter((r) => !isReleased(r));
+  const byKey = new Map(allRecords.filter((r) => !isReleased(r)).map((r) => [r.key, r]));
   for (const r of dayRecords) byKey.set(r.key, r);
   const strands = dayRecords.filter((r) => r.type === STRAND);
   const inStrand = new Set();

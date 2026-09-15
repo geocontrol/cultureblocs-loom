@@ -28,7 +28,10 @@ async function decide(rec, local) {
   const stringChanged = bodyChanged || stringState !== local.importedState;
   if (!stringChanged) return 'unchanged';
   const loomChanged = (await contentHash(local.body)) !== local.importedHash || local.state !== local.importedState;
-  return loomChanged ? 'conflict' : 'update';
+  if (loomChanged) return 'conflict';        // a released tombstone is a local change too
+  // Mint facts are never rewritten by import (spec §5).
+  if (bodyChanged && local.origin === 'mint') return 'conflict';
+  return 'update';
 }
 
 /* The local record a String record was sent from, if it has not been linked yet. */

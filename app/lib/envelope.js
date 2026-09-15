@@ -114,10 +114,15 @@ export async function openLoom({ store, registry, now = () => Date.now(), newDev
     keep: (key) => setState(key, 'kept', ['proposal']),
     /* A strand leaves draft when its author says it is told. */
     finish: (key) => setState(key, 'kept', ['draft']),
+    /* A proposal only Loom holds is deleted. One the String holds stays as a
+     * `released` tombstone — a local change awaiting Phase 2 sync, hidden from
+     * Thread — so the next import does not bring it back. */
     async release(key) {
       const current = await store.getRecord(key);
       if (current?.state !== 'proposal') throw new Error('only a proposal can be released');
-      await store.deleteRecord(key);
+      if (current.stringId) await setState(key, 'released', ['proposal']);
+      else await store.deleteRecord(key);
+      await store.deleteMeta(`draft:${key}`);
     },
     /* Unsaved edits to an existing record survive reloads here until saved or discarded. */
     saveDraft: (key, body) => store.setMeta(`draft:${key}`, { body, at: iso() }),

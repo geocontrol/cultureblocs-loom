@@ -38,7 +38,7 @@ export async function mountCompose(root, ctx, { key }) {
 
   async function loadContext() {
     const all = await ctx.store.allRecords();
-    state.dayBeads = all.filter((r) => r.day === record.day && r.type !== STRAND).sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+    state.dayBeads = all.filter((r) => r.day === record.day && r.type !== STRAND && r.state !== 'released').sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
     state.urls = await ctx.photoUrls(mediaNames(state.body));
   }
 

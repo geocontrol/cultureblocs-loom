@@ -39,3 +39,12 @@ test('a strand member made on another day still appears inside it', () => {
   const out = dayString([s], [early, s]);
   assert.deepEqual(out[0].members.map((m) => m.key), ['b/early']);
 });
+
+test('released tombstones are not shown: no count, no entry, not a strand member', () => {
+  const kept = rec('b/k', B, '2026-09-14T09:00:00Z');
+  const gone = rec('b/r', B, '2026-09-14T10:00:00Z', { state: 'released', sourceApp: 'scrobbler', stringId: 'x' });
+  const s = rec('s/1', S, '2026-09-14T22:00:00Z', { body: { items: [{ uri: 'loom://b/r' }] } });
+  assert.deepEqual(monthDays([kept, gone]), [{ day: '2026-09-14', count: 1, unsent: 1 }]);
+  assert.deepEqual(dayString([kept, gone, s]).map((e) => [e.record.key, (e.members || []).map((m) => m.key)]),
+    [['b/k', []], ['s/1', []]]);
+});

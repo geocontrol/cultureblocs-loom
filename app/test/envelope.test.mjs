@@ -79,6 +79,24 @@ test('editing a proposal keeps it; keep and release only apply to proposals', as
   assert.equal(await store.getRecord(`${BEAD}/p3`), undefined);
 });
 
+test('releasing a proposal the String holds leaves a released tombstone; a Loom-only one is deleted; drafts go too', async () => {
+  const { store, loom: l } = await loom();
+  const bead = await l.mint({ note: 'x' });
+  await store.putRecord({ ...bead, key: `${BEAD}/s1`, rkey: 's1', state: 'proposal', origin: 'import', stringId: 's1' });
+  await store.putRecord({ ...bead, key: `${BEAD}/p1`, rkey: 'p1', state: 'proposal' });
+  await l.saveDraft(`${BEAD}/s1`, { ...bead.body, note: 'half' });
+  await l.saveDraft(`${BEAD}/p1`, { ...bead.body, note: 'half' });
+  await l.release(`${BEAD}/s1`);
+  await l.release(`${BEAD}/p1`);
+  const tomb = await store.getRecord(`${BEAD}/s1`);
+  assert.equal(tomb.state, 'released');
+  assert.equal(tomb.stringId, 's1');
+  assert.equal(await store.getRecord(`${BEAD}/p1`), undefined);
+  assert.equal(await l.getDraft(`${BEAD}/s1`), undefined);
+  assert.equal(await l.getDraft(`${BEAD}/p1`), undefined);
+  await assert.rejects(l.keep(`${BEAD}/s1`), /a released record cannot become kept/);
+});
+
 test('the device id and clock survive reopening the store', async () => {
   const { store, loom: first } = await loom();
   const a = await first.mint({ note: 'a' });
