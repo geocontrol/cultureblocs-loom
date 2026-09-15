@@ -7,7 +7,7 @@ import { contentHash } from '../vendor/strip.js';
 import { fakeString, photo } from './fake-string.mjs';
 import { openLoom } from '../lib/envelope.js';
 import { runSend } from '../lib/sender.js';
-import { registry, steppingNow } from './helpers.mjs';
+import { makeBead, registry, steppingNow } from './helpers.mjs';
 
 const B = 'com.cultureblocs.bead', S = 'com.cultureblocs.strand';
 const T = '2026-09-13T10:00:00Z';
@@ -44,7 +44,7 @@ test('first import adds records, rewrites strand items to local keys, fetches ph
   assert.equal(await store.getMeta('lastImportAt'), new Date(1).toISOString());
 });
 
-test('re-import: unchanged, updated from the String, and conflicts left alone', async () => {
+test('re-import: unchanged, updated from the String, and a conflict marked with the String’s version', async () => {
   const s = fakeString({ records: [bead('u1', 'one'), bead('u2', 'two'), bead('u3', 'three')] });
   const store = createMemStore();
   const reg = await registry();
@@ -59,7 +59,29 @@ test('re-import: unchanged, updated from the String, and conflicts left alone', 
   assert.deepEqual([counts.add, counts.update, counts.unchanged, counts.conflict], [0, 1, 1, 1]);
   assert.deepEqual(conflicts, [`${B}/u3`]);
   assert.equal((await store.getRecord(`${B}/u2`)).body.note, 'two, edited on the String');
-  assert.equal((await store.getRecord(`${B}/u3`)).body.note, 'three, edited in Loom');
+  const u3After = await store.getRecord(`${B}/u3`);
+  assert.equal(u3After.body.note, 'three, edited in Loom');
+  assert.equal(u3After.conflict.reason, 'import');
+  assert.equal(u3After.conflict.theirs.body.note, 'three, edited on the String');
+  assert.equal('conflict' in (await store.getRecord(`${B}/u2`)), false);
+});
+
+test('every imported record keeps the String’s version, body keys and photos, for Send', async () => {
+  const name = `${'c'.repeat(64)}.jpg`;
+  const s = fakeString({ records: [bead('u1', 'one', { body: { $type: B, createdAt: T, kind: 'bloc', note: 'one', media: [{ uri: `/media/${name}` }] } })],
+    media: { [name]: photo('c') } });
+  const store = createMemStore();
+  const reg = await registry();
+  await runImport({ store, registry: reg, client: s.client });
+  const local = await store.getRecord(`${B}/u1`);
+  assert.equal(local.stringHlc, s.records[0].hlc);
+  assert.deepEqual(local.stringKeys, ['$type', 'createdAt', 'kind', 'note', 'media']);
+  assert.deepEqual(local.stringMedia, [name]);
+
+  s.records[0].hlc = '0000000000099-00000-fake';                    // restamped on the String, body unchanged (a publish)
+  const again = await runImport({ store, registry: reg, client: s.client });
+  assert.equal(again.counts.unchanged, 1);
+  assert.equal((await store.getRecord(`${B}/u1`)).stringHlc, '0000000000099-00000-fake');
 });
 
 test('keeping an imported proposal in Loom is a local change the String does not overwrite', async () => {
@@ -75,35 +97,41 @@ test('keeping an imported proposal in Loom is a local change the String does not
   assert.equal((await store.getRecord(`${B}/u1`)).state, 'kept');
 });
 
-test('a released proposal stays released on re-import, and a String change to it is a conflict', async () => {
+test('a record deleted in Loom is never re-added or updated by import', async () => {
   const s = fakeString({ records: [bead('u1', '5 tracks', { state: 'proposal', sourceApp: 'scrobbler' })] });
   const store = createMemStore();
   const reg = await registry();
   const loom = await openLoom({ store, registry: reg, now: steppingNow(), newDeviceId: () => 'desk-1' });
   await runImport({ store, registry: reg, client: s.client });
-  await loom.release(`${B}/u1`);
+  await loom.remove(`${B}/u1`);                                        // released: deleted on the next Send
   const again = await runImport({ store, registry: reg, client: s.client });
   assert.deepEqual([again.counts.add, again.counts.update, again.counts.unchanged], [0, 0, 1]);
-  assert.equal((await store.getRecord(`${B}/u1`)).state, 'released');
   s.records[0].body.note = '6 tracks';
   const changed = await runImport({ store, registry: reg, client: s.client });
-  assert.deepEqual(changed.conflicts, [`${B}/u1`]);
-  assert.equal((await store.getRecord(`${B}/u1`)).state, 'released');
+  assert.deepEqual([changed.counts.update, changed.conflicts.length], [0, 0]);
+  const local = await store.getRecord(`${B}/u1`);
+  assert.deepEqual([local.deleted, local.body.note, 'conflict' in local], [true, '5 tracks', false]);
   assert.equal((await store.allRecords()).length, 1);
 });
 
-test('a String change to a mint fact is a conflict, never an update', async () => {
+test('a String edit to a record Loom made updates it like any other; a provenance change is a conflict', async () => {
   const store = createMemStore();
   const reg = await registry();
   const loom = await openLoom({ store, registry: reg, now: steppingNow(), newDeviceId: () => 'desk-1' });
-  const minted = await loom.mint({ note: 'as minted' });
+  const made = await makeBead(loom, { note: 'as written' });
   const s = fakeString();
   await runSend({ store, client: s.client });
-  s.records[0].body.note = 'rewritten on the String';
-  const { counts, conflicts } = await runImport({ store, registry: reg, client: s.client });
-  assert.deepEqual([counts.update, counts.conflict], [0, 1]);
-  assert.deepEqual(conflicts, [minted.key]);
-  assert.equal((await store.getRecord(minted.key)).body.note, 'as minted');
+  s.records[0].body.note = 'corrected on the String';
+  const first = await runImport({ store, registry: reg, client: s.client });
+  assert.deepEqual([first.counts.update, first.counts.conflict], [1, 0]);
+  assert.equal((await store.getRecord(made.key)).body.note, 'corrected on the String');
+
+  s.records[0].body.provenance = { ...s.records[0].body.provenance, mintedAt: '2020-01-01T00:00:00Z' };
+  const second = await runImport({ store, registry: reg, client: s.client });
+  assert.deepEqual(second.conflicts, [made.key]);
+  const local = await store.getRecord(made.key);
+  assert.equal(local.body.provenance.mintedAt, made.body.provenance.mintedAt);
+  assert.equal(local.conflict.theirs.body.provenance.mintedAt, '2020-01-01T00:00:00Z');
 });
 
 test('an invalid String record is imported and flagged, not dropped', async () => {

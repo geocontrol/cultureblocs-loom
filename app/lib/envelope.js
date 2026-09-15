@@ -4,15 +4,20 @@
  * checks before it touches the store; a record with problems is never stored.
  * Every write is stamped with this device's HLC. Imported records arrive
  * through importer.js instead and are the one exception to validation (they
- * are already on the String, so hiding them would be worse). */
+ * are already on the String, so hiding them would be worse).
+ *
+ * A new record is written whole, once: until Save it exists only as a draft
+ * (`draft:<key>` in meta, under a key reserved when its form opened). */
 import { anchorProblems } from '../vendor/refs.js';
 import { createClock } from './hlc.js';
-import { dayOf, recordKey } from './keys.js';
+import { dayOf, itemUri, recordKey } from './keys.js';
 import { mediaNames } from './media.js';
 import { tidGenerator } from './tid.js';
 
 export const BEAD = 'com.cultureblocs.bead';
 export const STRAND = 'com.cultureblocs.strand';
+export const EDITABLE = [BEAD, STRAND];
+const PUBLISHED = ['published', 'edited'];
 
 export class InvalidRecord extends Error {
   constructor(problems) {
@@ -29,9 +34,16 @@ export class Conflict extends Error {
   }
 }
 
-export const isAbandonable = (r) =>
-  r?.type === STRAND && r.state === 'draft' && r.origin === 'compose' && !r.stringId;
+/* Why a record cannot be deleted in Loom, or null if it can. */
+export function whyNotDeletable(r) {
+  if (!r) return 'there is no such record';
+  if (!EDITABLE.includes(r.type)) return 'records of this type are read-only in Loom';
+  if (PUBLISHED.includes(r.state)) return 'it is published: unpublish it first';
+  return null;
+}
 
+const list = (v) => (Array.isArray(v) ? v : []);   // imported bodies are not validated: guard their shape
+const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const randomDeviceId = () => `loom-${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}`;
 
 export async function openLoom({ store, registry, now = () => Date.now(), newDeviceId = randomDeviceId, nowMicros }) {
@@ -59,42 +71,38 @@ export async function openLoom({ store, registry, now = () => Date.now(), newDev
     if (problems.length) throw new InvalidRecord(problems);
   }
 
-  async function create(type, body, { origin, state }) {
+  /* `at` is the moment of the save: the record's updatedAt, and the time its body records. */
+  async function create(key, type, body, at) {
     check(type, body);
-    const rkey = tid();
+    if (await store.getRecord(key)) throw new Error(`${key} already exists`);
     const env = {
-      key: recordKey(type, rkey), type, rkey, body, state, origin, sourceApp: 'loom',
-      createdAt: body.createdAt, updatedAt: iso(), hlc: await stamp(), deviceId,
+      key, type, rkey: key.slice(type.length + 1), body, state: 'kept', origin: 'loom', sourceApp: 'loom',
+      createdAt: body.createdAt, updatedAt: at, hlc: await stamp(), deviceId,
       day: dayOf(type, body, body.createdAt),
     };
     await store.putRecord(env);
+    await store.deleteMeta(`draft:${key}`);
     return env;
   }
 
-  /* The mint fact: a bead written before anything else happens. */
-  function mint({ mask, note, kind = 'bloc' }) {
-    const at = iso();
-    const body = { $type: BEAD, createdAt: at, kind };
-    if (note && note.trim()) body.note = note.trim();
-    if (mask) body.tags = [mask.toLowerCase()];
-    body.provenance = { app: 'loom', device: deviceId, mintedAt: at, timeAnchored: true };
-    return create(BEAD, body, { origin: 'mint', state: 'kept' });
-  }
-
   /* Replace a record's body. `expectUpdatedAt` is the updatedAt the editor
-   * loaded; if the stored record has moved on, nothing is written. Editing a
-   * proposal keeps it: a person has stood behind it. */
+   * loaded; if the stored record has moved on, nothing is written. Provenance
+   * is fixed: a body that changes it is refused. Editing a proposal keeps it;
+   * saving a Phase 1 draft that never reached the String keeps it too. */
   async function save(key, body, { expectUpdatedAt } = {}) {
     const current = await store.getRecord(key);
     if (!current) throw new Error(`no record ${key}`);
+    if (current.deleted) throw new Error(`${key} is deleted: undo the delete to edit it`);
     if (expectUpdatedAt !== undefined && current.updatedAt !== expectUpdatedAt) throw new Conflict(current);
+    if (!same(body?.provenance, current.body?.provenance)) throw new InvalidRecord(['$.provenance: fixed when the record was made']);
     check(current.type, body);
-    // The body just passed the gate, so an import's `invalid` flag no longer
-    // applies; `missing` keeps only photos the new body still uses.
-    const { invalid: _, missing = [], ...rest } = current;
+    // The body just passed the gate, so an import's `invalid` flag and the
+    // String's last refusal no longer apply; `missing` keeps only photos the new body still uses.
+    const { invalid: _i, problems: _p, missing = [], ...rest } = current;
+    const keeps = current.state === 'proposal' || (current.state === 'draft' && !current.stringId);
     const env = {
       ...rest, body, updatedAt: iso(), hlc: await stamp(), deviceId,
-      state: current.state === 'proposal' ? 'kept' : current.state,
+      state: keeps ? 'kept' : current.state,
       day: dayOf(current.type, body, current.createdAt),
     };
     const used = new Set(mediaNames(body));
@@ -105,47 +113,96 @@ export async function openLoom({ store, registry, now = () => Date.now(), newDev
     return env;
   }
 
-  async function setState(key, state, allowedFrom) {
-    const current = await store.getRecord(key);
-    if (!current) throw new Error(`no record ${key}`);
-    if (!allowedFrom.includes(current.state)) throw new Error(`a ${current.state} record cannot become ${state}`);
-    const env = { ...current, state, updatedAt: iso(), hlc: await stamp(), deviceId };
+  async function rewrite(current, changes) {
+    const env = { ...current, ...changes, updatedAt: iso(), hlc: await stamp(), deviceId };
     await store.putRecord(env);
     return env;
+  }
+
+  /* Strands (not deleted) whose items point at `key`. */
+  async function strandsUsing(key) {
+    const uri = itemUri(key);
+    return (await store.allRecords()).filter((r) => r.type === STRAND && !r.deleted
+      && list(r.body?.items).some((it) => it?.uri === uri));
   }
 
   return {
     deviceId,
     validate,
-    create,
-    mint,
-    save,
     get: (key) => store.getRecord(key),
-    keep: (key) => setState(key, 'kept', ['proposal']),
-    /* A strand leaves draft when its author says it is told. */
-    finish: (key) => setState(key, 'kept', ['draft']),
-    /* A proposal only Loom holds is deleted. One the String holds stays as a
-     * `released` tombstone — a local change awaiting Phase 2 sync, hidden from
-     * Thread — so the next import does not bring it back. */
-    async release(key) {
+    /* A key for a record not yet written: its draft lives under this key until Save. */
+    newKey: (type) => recordKey(type, tid()),
+
+    /* A bead, whole. `createdAt` is when it happened (defaults to now);
+     * provenance records the save, and whether the time was left at now. */
+    createBead(key, body, { timeAnchored = true } = {}) {
+      const at = iso();
+      const full = { ...body, $type: BEAD, createdAt: body.createdAt || at,
+        provenance: { app: 'loom', device: deviceId, mintedAt: at, timeAnchored } };
+      return create(key, BEAD, full, at);
+    },
+    /* A strand, whole: made now, for the day in its body. */
+    createStrand(key, body) {
+      const at = iso();
+      return create(key, STRAND, { ...body, $type: STRAND, createdAt: at, items: list(body.items) }, at);
+    },
+    save,
+
+    async keep(key) {
       const current = await store.getRecord(key);
-      if (current?.state !== 'proposal') throw new Error('only a proposal can be released');
-      if (current.stringId) await setState(key, 'released', ['proposal']);
+      if (current?.state !== 'proposal') throw new Error(`a ${current?.state ?? 'missing'} record cannot be kept`);
+      return rewrite(current, { state: 'kept' });
+    },
+
+    strandsUsing,
+
+    /* Delete a record (releasing a proposal is the same act). One never on the
+     * String goes now; one on the String is marked `deleted` until Send deletes
+     * it there. Strands that use a deleted bead lose that item (validated and
+     * stamped, their state untouched). Returns the keys of the strands changed. */
+    async remove(key) {
+      const current = await store.getRecord(key);
+      const why = whyNotDeletable(current);
+      if (why) throw new Error(`cannot delete ${key}: ${why}`);
+      const changed = [];
+      for (const s of await strandsUsing(key)) {
+        const body = { ...s.body, items: list(s.body.items).filter((it) => it?.uri !== itemUri(key)) };
+        check(STRAND, body);
+        await rewrite(s, { body });
+        changed.push(s.key);
+      }
+      await store.deleteMeta(`draft:${key}`);
+      if (current.stringId) await rewrite(current, { deleted: true });
       else await store.deleteRecord(key);
-      await store.deleteMeta(`draft:${key}`);
+      return changed;
     },
-    /* An entry started in Compose and never told: discarding it deletes it. */
-    async abandon(key) {
+
+    /* Take back a delete Send has not made yet. Strands keep the items they lost. */
+    async undoRemove(key) {
       const current = await store.getRecord(key);
-      if (!isAbandonable(current)) throw new Error('only an entry still in draft, never sent, can be discarded');
-      await store.deleteRecord(key);
-      await store.deleteMeta(`draft:${key}`);
+      if (!current?.deleted) throw new Error(`${key} is not waiting to be deleted`);
+      const { deleted: _, ...rest } = current;
+      return rewrite(rest, {});
     },
-    /* Unsaved edits to an existing record survive reloads here until saved or
-     * discarded. `baseUpdatedAt` is the record's updatedAt the edits were typed
-     * against, so saving a restored draft over a newer record is a Conflict. */
-    saveDraft: (key, body, baseUpdatedAt) => store.setMeta(`draft:${key}`, { body, at: iso(), baseUpdatedAt }),
+
+    /* Unsaved work survives reloads here until saved or discarded. For an
+     * existing record `baseUpdatedAt` is the updatedAt the edits were typed
+     * against (saving over a newer record is a Conflict); a new record's draft
+     * has none and names its type. */
+    saveDraft: (key, body, baseUpdatedAt = null, type = null) =>
+      store.setMeta(`draft:${key}`, { body, at: iso(), baseUpdatedAt, ...(type ? { type } : {}) }),
     getDraft: (key) => store.getMeta(`draft:${key}`),
     discardDraft: (key) => store.deleteMeta(`draft:${key}`),
+    /* Drafts of records not yet written: [{ key, type, body, at }]. */
+    async newDrafts() {
+      const meta = await store.allMeta();
+      const out = [];
+      for (const [k, v] of Object.entries(meta)) {
+        if (!k.startsWith('draft:') || !v?.type) continue;
+        const key = k.slice('draft:'.length);
+        if (!(await store.getRecord(key))) out.push({ key, type: v.type, body: v.body, at: v.at });
+      }
+      return out;
+    },
   };
 }

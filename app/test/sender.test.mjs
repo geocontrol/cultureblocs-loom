@@ -9,7 +9,7 @@ import { runImport } from '../lib/importer.js';
 import { exportBackup, restoreBackup } from '../lib/backup.js';
 import { contentHash } from '../vendor/strip.js';
 import { fakeString, photo } from './fake-string.mjs';
-import { registry, steppingNow } from './helpers.mjs';
+import { makeBead, makeStrand, registry, steppingNow } from './helpers.mjs';
 
 async function setup() {
   const store = createMemStore();
@@ -22,10 +22,11 @@ const strandBody = (keys, title = 'Sunday') => ({ $type: STRAND, createdAt: '202
 
 test('planSend: beads first, finished strands after, drafts and waiting strands held', async () => {
   const { loom, store } = await setup();
-  const bead = await loom.mint({ note: 'a' });
-  const told = await loom.create(STRAND, strandBody([bead.key]), { origin: 'compose', state: 'kept' });
-  const draft = await loom.create(STRAND, strandBody([bead.key], 'draft'), { origin: 'compose', state: 'draft' });
-  const orphan = await loom.create(STRAND, strandBody(['com.cultureblocs.bead/elsewhere']), { origin: 'compose', state: 'kept' });
+  const bead = await makeBead(loom, { note: 'a' });
+  const told = await makeStrand(loom, strandBody([bead.key]));
+  const draft = await makeStrand(loom, strandBody([bead.key], 'draft'));
+  await store.putRecord({ ...draft, state: 'draft' });              // a Phase 1 draft
+  const orphan = await makeStrand(loom, strandBody(['com.cultureblocs.bead/elsewhere']));
   const { ready, held } = planSend(await store.allRecords());
   assert.deepEqual(ready.map((r) => r.key), [bead.key, told.key]);
   assert.deepEqual(held, [
@@ -37,9 +38,9 @@ test('planSend: beads first, finished strands after, drafts and waiting strands 
 test('runSend uploads photos, posts beads then strands with spine:// items, and records String ids', async () => {
   const { loom, store } = await setup();
   const uri = await putPhoto(store, photo());
-  const bead = await loom.mint({ note: 'with photo' });
+  const bead = await makeBead(loom, { note: 'with photo' });
   await loom.save(bead.key, { ...bead.body, media: [{ uri, mime: 'image/jpeg' }] });
-  const strand = await loom.create(STRAND, strandBody([bead.key]), { origin: 'compose', state: 'kept' });
+  const strand = await makeStrand(loom, strandBody([bead.key]));
   const s = fakeString();
 
   const results = await runSend({ store, client: s.client, now: () => 5 });
@@ -55,7 +56,7 @@ test('runSend uploads photos, posts beads then strands with spine:// items, and 
 
 test('sending again is harmless: nothing unsent, and a lost response is recovered by dedupe', async () => {
   const { loom, store } = await setup();
-  const bead = await loom.mint({ note: 'a' });
+  const bead = await makeBead(loom, { note: 'a' });
   const s = fakeString();
   await runSend({ store, client: s.client });
   assert.deepEqual(await runSend({ store, client: s.client }), []);
@@ -71,9 +72,9 @@ test('sending again is harmless: nothing unsent, and a lost response is recovere
 
 test('a record the String rejects stays unsent with its problems; a photo missing locally fails that record only', async () => {
   const { loom, store } = await setup();
-  const rejected = await loom.mint({ note: 'String says no' });
-  const fine = await loom.mint({ note: 'fine' });
-  const nophoto = await loom.mint({ note: 'lost photo' });
+  const rejected = await makeBead(loom, { note: 'String says no' });
+  const fine = await makeBead(loom, { note: 'fine' });
+  const nophoto = await makeBead(loom, { note: 'lost photo' });
   await store.putRecord({ ...nophoto, body: { ...nophoto.body, media: [{ uri: `/media/${'a'.repeat(64)}.jpg` }] } });
   const s = fakeString({ reject: { [`loom:${rejected.rkey}`]: ['$.kind: unknown on this String'] } });
   const results = Object.fromEntries((await runSend({ store, client: s.client })).map((r) => [r.key, r]));
@@ -93,7 +94,7 @@ const gate = () => {
 
 test('an edit saved while its record is being posted survives, and reads as a local change', async () => {
   const { loom, store } = await setup();
-  const bead = await loom.mint({ note: 'as posted' });
+  const bead = await makeBead(loom, { note: 'as posted' });
   const s = fakeString();
   const g = gate();
   const client = { ...s.client, async postRecords(batch) { await g.pass(); return s.client.postRecords(batch); } };
@@ -114,7 +115,7 @@ test('an edit saved while its record is being posted survives, and reads as a lo
 
 test('a lost response, a local edit, then a resend answered "duplicate": the edit stays a local change', async () => {
   const { loom, store } = await setup();
-  const bead = await loom.mint({ note: 'first' });
+  const bead = await makeBead(loom, { note: 'first' });
   const s = fakeString();
   await runSend({ store, client: s.client });
   const { stringId, sentAt: _s, stringHash: _h, importedHash: _i, importedState: _t, ...lost } = await store.getRecord(bead.key);
@@ -134,8 +135,8 @@ test('a lost response, a local edit, then a resend answered "duplicate": the edi
 
 test('restoring a backup taken before a send, then importing, links the sent records instead of copying them', async () => {
   const { loom, store } = await setup();
-  const bead = await loom.mint({ note: 'a' });
-  await loom.create(STRAND, strandBody([bead.key]), { origin: 'compose', state: 'kept' });
+  const bead = await makeBead(loom, { note: 'a' });
+  await makeStrand(loom, strandBody([bead.key]));
   const doc = JSON.parse(JSON.stringify(await exportBackup(store)));
   const s = fakeString();
   await runSend({ store, client: s.client });
@@ -154,8 +155,8 @@ test('restoring a backup taken before a send, then importing, links the sent rec
 
 test('a sent record comes back from the next import as unchanged, not as a conflict', async () => {
   const { loom, store } = await setup();
-  const bead = await loom.mint({ note: 'a' });
-  await loom.create(STRAND, strandBody([bead.key]), { origin: 'compose', state: 'kept' });
+  const bead = await makeBead(loom, { note: 'a' });
+  await makeStrand(loom, strandBody([bead.key]));
   const s = fakeString();
   await runSend({ store, client: s.client });
   const { runImport } = await import('../lib/importer.js');

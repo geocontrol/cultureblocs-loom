@@ -6,7 +6,7 @@ const VERSION = 'loom-2';
 const SHELL = [
   './', './index.html', './loom.css', './loom.js', './manifest.webmanifest', './icon-192.png', './icon-512.png',
   './lib/anchors.js', './lib/backup.js', './lib/day.js', './lib/envelope.js', './lib/hlc.js', './lib/images.js',
-  './lib/importer.js', './lib/keys.js', './lib/lexicons.js', './lib/media.js', './lib/memstore.js',
+  './lib/importer.js', './lib/keys.js', './lib/lexicons.js', './lib/media.js', './lib/memstore.js', './lib/migrate.js',
   './lib/routing.js', './lib/sender.js', './lib/store.js', './lib/string-client.js', './lib/tid.js',
   './ui/html.js', './ui/view-refs.js',
   './vendor/lexicon.js', './vendor/refs.js', './vendor/strip.js',
