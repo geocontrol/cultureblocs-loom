@@ -9,7 +9,7 @@ import { APP } from './helpers.mjs';
 test('html escapes values but not nested html or raw()', () => {
   assert.equal(String(html`<p>${'<script>'}</p>`), '<p>&lt;script&gt;</p>');
   assert.equal(String(html`<p>${html`<b>${'&'}</b>`}${raw('<i>')}</p>`), '<p><b>&amp;</b><i></p>');
-  assert.equal(esc(`”'`), '&quot;&#39;');
+  assert.equal(esc(`"'`), '&quot;&#39;');
 });
 
 test('publishHint explains what the strip would withhold', () => {
@@ -41,5 +41,5 @@ test('the refs editor carries no inline styles or inline event handlers (the CSP
 
 test('index.html declares the content security policy', () => {
   const page = readFileSync(join(APP, 'index.html'), 'utf8');
-  assert.match(page, /<meta http-equiv=”Content-Security-Policy” content=”default-src 'self'; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; connect-src \*; worker-src 'self'; manifest-src 'self'”>/);
+  assert.match(page, /<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; connect-src \*; worker-src 'self'; manifest-src 'self'">/);
 });
