@@ -8,9 +8,6 @@ const STRAND = 'com.cultureblocs.strand';
 const list = (v) => (Array.isArray(v) ? v : []);   // imported bodies are not validated: guard their shape
 const str = (v) => (typeof v === 'string' ? v : '');
 
-/* Made in Loom and not on the String: lives only in this browser. */
-export const isLoomOnly = (r) => r.sourceApp === 'loom' && !r.stringId;
-
 /* What Send has to do for a record: 'new' | 'edit' | 'state' | 'delete', or null.
  * A record in conflict waits for the person; a Phase 1 draft never sent stays home. */
 export async function pendingChange(r) {
