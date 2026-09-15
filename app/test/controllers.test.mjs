@@ -9,6 +9,7 @@ import { mountCompose, newStrand } from '../ui/compose.js';
 import { mountMint } from '../ui/mint.js';
 import { mountPanel } from '../ui/string-panel.js';
 import { mountThread } from '../ui/thread.js';
+import { BACKUP_TYPE } from '../lib/backup.js';
 import { registry, steppingNow } from './helpers.mjs';
 
 function fakeRoot() {
@@ -81,4 +82,25 @@ test('the string panel renders and reports an unreachable String', async () => {
   assert.match(root.innerHTML, /0 Loom-made records/);
   await root.fire('click', button('check'));
   assert.match(root.innerHTML, /unreachable \(offline\)/);
+});
+
+test('restore asks first, naming what it replaces, then restores and reloads every tab', async () => {
+  const ctx = await context();
+  const events = [];
+  Object.assign(ctx, { broadcast: (kind = 'changed') => events.push(`broadcast ${kind}`), reload: () => events.push('reload'),
+    download: (name) => events.push(`download ${name}`) });
+  const mine = await ctx.loom.mint({ note: 'not sent yet' });
+  const root = fakeRoot();
+  await mountPanel(root, ctx);
+  const doc = { $type: BACKUP_TYPE, version: 1, records: [], meta: {}, blobs: {} };
+  const input = { dataset: { action: 'restore' }, files: [{ name: 'old.json', text: async () => JSON.stringify(doc) }], value: 'old.json' };
+  await root.fire('change', input);
+  assert.match(root.innerHTML, /replaces 1 record in this browser \(1 not yet sent to the String\)/);
+  assert.match(root.innerHTML, /data-action="backup"[^>]*>download a backup first/);
+  assert.ok(await ctx.store.getRecord(mine.key), 'nothing is replaced before confirming');
+  await root.fire('click', { closest: (sel) => (sel === 'button[data-action]' ? { dataset: { action: 'backup' } } : null) });
+  await root.fire('click', { closest: (sel) => (sel === 'button[data-action]' ? { dataset: { action: 'restore-confirm' } } : null) });
+  assert.equal(await ctx.store.getRecord(mine.key), undefined);
+  assert.deepEqual(events.filter((e) => !e.startsWith('download')), ['broadcast restored', 'reload']);
+  assert.ok(events[0].startsWith('download loom-backup-'));
 });

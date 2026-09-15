@@ -27,6 +27,15 @@ export const storeContract = {
     r.body.note = 'mutated after put';
     assert.equal((await store.getRecord('com.cultureblocs.bead/a')).body.note, 'com.cultureblocs.bead/a');
   },
+  async 'a stored blob row is a copy, not the caller\'s object'(store, assert) {
+    const row = { hash: 'h1', mime: 'image/jpeg', blob: new Blob(['pixels'], { type: 'image/jpeg' }) };
+    await store.putBlob(row);
+    row.mime = 'mutated after put';
+    const got = await store.getBlob('h1');
+    assert.equal(got.mime, 'image/jpeg');
+    got.mime = 'mutated after get';
+    assert.equal((await store.getBlob('h1')).mime, 'image/jpeg');
+  },
   async 'blobs round-trip and list by hash'(store, assert) {
     await store.putBlob({ hash: 'h1', mime: 'image/jpeg', blob: new Blob(['pixels'], { type: 'image/jpeg' }) });
     const row = await store.getBlob('h1');

@@ -156,6 +156,64 @@ test('an edit saved while an import fetches a photo is a conflict, and the edit 
   assert.equal((await store.getRecord(`${B}/u1`)).body.note, 'edited in Loom meanwhile');
 });
 
+test('import lists the String day by day and keeps only record types Loom knows', async () => {
+  const s = fakeString({ records: [
+    bead('u1', 'Saturday'),
+    bead('u2', 'Sunday', { createdAt: '2026-09-14T10:00:00Z', body: { $type: B, createdAt: '2026-09-14T10:00:00Z', kind: 'bloc', note: 'Sunday' } }),
+    { id: 'x1', type: 'com.example.unknown', sourceApp: 'elsewhere', createdAt: T, state: 'kept', body: { anything: true } },
+  ] });
+  const store = createMemStore();
+  const { counts } = await runImport({ store, registry: await registry(), client: s.client });
+  assert.deepEqual(s.calls, ['listDays', 'listRecordsForDay 2026-09-14', 'listRecordsForDay 2026-09-13']);
+  assert.equal(counts.add, 2);
+  assert.deepEqual((await store.allRecords()).map((r) => r.key).sort(), [`${B}/u1`, `${B}/u2`]);
+});
+
+const strand = (id, items, extra = {}) => ({ id, type: S, sourceApp: 'timeline', createdAt: T, state: 'kept',
+  body: { $type: S, createdAt: T, title: 'Saturday', items: items.map((i) => ({ uri: `spine://records/${i}` })) }, ...extra });
+
+test('a strand re-imported unchanged stays unchanged', async () => {
+  const s = fakeString({ records: [bead('u1', 'one'), strand('s1', ['u1'])] });
+  const store = createMemStore();
+  const reg = await registry();
+  await runImport({ store, registry: reg, client: s.client });
+  const before = await store.getRecord(`${S}/s1`);
+  const { counts, conflicts } = await runImport({ store, registry: reg, client: s.client });
+  assert.deepEqual([counts.unchanged, counts.update, conflicts.length], [2, 0, 0]);
+  assert.deepEqual(await store.getRecord(`${S}/s1`), before);
+});
+
+test('a strand member that arrives after its strand is linked in on the next import, with no conflict', async () => {
+  const s = fakeString({ records: [strand('s1', ['u9']), strand('s2', ['u9'], { body: { $type: S, createdAt: T, title: 'edited here', items: [{ uri: 'spine://records/u9' }] } })] });
+  const store = createMemStore();
+  const reg = await registry();
+  await runImport({ store, registry: reg, client: s.client });
+  const s2 = await store.getRecord(`${S}/s2`);
+  await store.putRecord({ ...s2, body: { ...s2.body, title: 'retitled in Loom' } });   // s2 changed locally
+  s.records.push(bead('u9', 'late'));
+  const second = await runImport({ store, registry: reg, client: s.client });
+  assert.deepEqual([second.counts.add, second.counts.conflict], [1, 0]);
+  const s1 = await store.getRecord(`${S}/s1`);
+  assert.deepEqual(s1.body.items, [{ uri: `loom://${B}/u9` }]);
+  assert.equal(await contentHash(s1.body), s1.importedHash, 'the rewrite is not a local change');
+  assert.deepEqual((await store.getRecord(`${S}/s2`)).body.items, [{ uri: 'spine://records/u9' }], 'a locally changed strand is left alone');
+  const third = await runImport({ store, registry: reg, client: s.client });
+  assert.deepEqual([third.counts.unchanged, third.counts.conflict], [3, 0]);
+});
+
+test('a photo that still cannot be fetched on retry is counted as missing', async () => {
+  const pic = photo('never');
+  const name = await nameOf(pic);
+  const s = fakeString({ records: [bead('u1', 'p', { body: { $type: B, createdAt: T, kind: 'bloc', media: [{ uri: `/media/${name}` }] } })],
+    failMedia: new Set([name]) });
+  const store = createMemStore();
+  const reg = await registry();
+  await runImport({ store, registry: reg, client: s.client });
+  const second = await runImport({ store, registry: reg, client: s.client });
+  assert.equal(second.counts.missing, 1);
+  assert.deepEqual((await store.getRecord(`${B}/u1`)).missing, [name]);
+});
+
 test('planImport is decided by hashes and states alone', async () => {
   const rec = bead('u1', 'x');
   const h = await contentHash(rec.body);

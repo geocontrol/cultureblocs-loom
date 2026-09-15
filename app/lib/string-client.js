@@ -2,6 +2,10 @@
  * Every error names the URL and the status, because "404" alone once meant a
  * different server was answering on the String's port. */
 
+export const LIST_LIMIT = 2000;   // the most one GET /records returns (the String caps limit here)
+
+const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
 export class StringError extends Error {
   constructor(url, detail) {
     super(`${url}: ${detail}`);
@@ -25,6 +29,16 @@ export function stringClient(baseUrl, token, fetchImpl = globalThis.fetch.bind(g
     return res;
   }
 
+  /* The JSON body of a 200, checked: `check` returns a problem in words, or nothing. */
+  async function json(path, check, init) {
+    const res = await call(path, init);
+    let body;
+    try { body = await res.json(); } catch { throw new StringError(base + path, 'the answer is not JSON (is this the String?)'); }
+    const problem = check(body);
+    if (problem) throw new StringError(base + path, problem);
+    return body;
+  }
+
   return {
     base,
     /* Confirms the thing answering is a String: it must list cultureblocs lexicons. */
@@ -36,23 +50,39 @@ export function stringClient(baseUrl, token, fetchImpl = globalThis.fetch.bind(g
       }
       return types;
     },
-    async listRecords(type) {
-      return (await (await call(`/records?type=${encodeURIComponent(type)}&limit=2000`)).json()).records;
+    /* [{ day, count }] — the days the String holds records for. */
+    async listDays() {
+      const body = await json('/days', (b) => (Array.isArray(b?.days) && b.days.every((d) => typeof d?.day === 'string')
+        ? null : 'expected { days: [{ day, count }] }'));
+      return body.days;
+    },
+    /* Every record created on one day. A full page means some were cut off, so it fails. */
+    async listRecordsForDay(day) {
+      const path = `/records?day=${encodeURIComponent(day)}&limit=${LIST_LIMIT}`;
+      const body = await json(path, (b) => (Array.isArray(b?.records) && b.records.every(isObject)
+        ? null : 'expected { records: [...] }'));
+      if (body.records.length >= LIST_LIMIT) {
+        throw new StringError(base + path, `returned ${body.records.length} records, the most one request returns; `
+          + 'some would be missed, so nothing was imported');
+      }
+      return body.records;
     },
     async getRecord(id) {
-      return (await call(`/records/${encodeURIComponent(id)}`)).json();
+      return json(`/records/${encodeURIComponent(id)}`, (b) => (isObject(b) && typeof b.id === 'string' && isObject(b.body)
+        ? null : 'expected a record with an id and an object body'));
     },
     async getMedia(name) {
       return (await call(`/media/${encodeURIComponent(name)}`)).blob();
     },
     async postRecords(records) {
-      const res = await call('/records', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ records }) });
-      return (await res.json()).results;
+      const body = await json('/records', (b) => (Array.isArray(b?.results) && b.results.length === records.length
+        ? null : `expected { results: [...] } with ${records.length} entries`),
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ records }) });
+      return body.results;
     },
     async postMedia(blob) {
-      const res = await call('/media', { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
-      return res.json();   // { uri, mime, bytes }
+      return json('/media', (b) => (typeof b?.uri === 'string' ? null : 'expected { uri, mime, bytes }'),
+        { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });   // { uri, mime, bytes }
     },
   };
 }

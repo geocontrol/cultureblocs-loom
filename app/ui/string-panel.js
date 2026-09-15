@@ -1,6 +1,6 @@
 /* String panel controller: settings, check, import, send, backup, restore. */
 import { contentHash } from '../vendor/strip.js';
-import { exportBackup, restoreBackup } from '../lib/backup.js';
+import { checkBackup, exportBackup, restoreBackup } from '../lib/backup.js';
 import { isUnsent } from '../lib/day.js';
 import { runImport } from '../lib/importer.js';
 import { runSend } from '../lib/sender.js';
@@ -67,6 +67,21 @@ export async function mountPanel(root, ctx) {
         catch (err) { s.sendResults = [{ key: '', status: 'failed', reason: err.message }]; }
         ctx.broadcast();
       });
+    } else if (action === 'restore-confirm' && s.pendingRestore) {
+      const { doc } = s.pendingRestore;
+      s.pendingRestore = null;
+      try {
+        await restoreBackup(ctx.store, doc);
+      } catch (err) {
+        s.importResult = `restore failed: ${err.message} — the backup file is unchanged; try again`;
+        await render();
+        return;
+      }
+      ctx.broadcast('restored');
+      ctx.reload();   // every tab reloads onto the restored store
+    } else if (action === 'restore-cancel') {
+      s.pendingRestore = null;
+      await render();
     } else if (action === 'backup') {
       const doc = await exportBackup(ctx.store, ctx.now);
       ctx.download(`loom-backup-${doc.exportedAt.slice(0, 10)}.json`, JSON.stringify(doc));
@@ -82,11 +97,15 @@ export async function mountPanel(root, ctx) {
       s[el.name] = el.value.trim();
       if (el.name === 'posture') ctx.applyPosture();
     } else if (el.dataset?.action === 'restore' && el.files?.[0]) {
+      const file = el.files[0];
+      el.value = '';
       try {
-        const { records, photos } = await restoreBackup(ctx.store, JSON.parse(await el.files[0].text()));
-        s.importResult = `restored ${records} records and ${photos} photos`;
-        ctx.broadcast();
-      } catch (err) { s.importResult = err.message; }
+        const doc = JSON.parse(await file.text());
+        checkBackup(doc);
+        const here = await ctx.store.allRecords();
+        s.pendingRestore = { doc, fileName: file.name, records: here.length, incoming: doc.records.length,
+          unsent: here.filter((r) => r.sourceApp === 'loom' && !r.stringId).length };
+      } catch (err) { s.importResult = `not restored: ${err.message}`; }
       await render();
     }
   }

@@ -25,7 +25,8 @@ async function boot() {
     store, registry, loom,
     now: () => Date.now(),
     fetch: (...a) => fetch(...a),
-    broadcast: () => channel?.postMessage('changed'),
+    broadcast: (kind = 'changed') => channel?.postMessage(kind),
+    reload: () => location.reload(),
     setDirty: (d) => { dirty = d; },
     async persisted() { return (await navigator.storage?.persisted?.()) ?? false; },
     async photoUrls(names) {
@@ -86,8 +87,9 @@ async function boot() {
 
   window.addEventListener('hashchange', route);
   matchMedia('(min-width: 900px)').addEventListener('change', route);
-  channel?.addEventListener('message', () => {
-    if (!dirty) mounted.forEach((m) => m.render?.());
+  channel?.addEventListener('message', (e) => {
+    if (e.data === 'restored') location.reload();   // another tab replaced the store
+    else if (!dirty) mounted.forEach((m) => m.render?.());
   });
 
   if (navigator.storage?.persist && !(await navigator.storage.persisted())) {

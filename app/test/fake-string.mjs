@@ -5,10 +5,21 @@ import { mediaName, sha256Hex } from '../lib/media.js';
 export function fakeString({ records = [], media = {}, failMedia = new Set(), reject = {} } = {}) {
   let n = 0;
   const posted = [];
+  const calls = [];
+  const dayOf = (r) => String(r.createdAt).slice(0, 10);
   const client = {
     base: 'http://string.test',
     async health() { return ['com.cultureblocs.bead', 'com.cultureblocs.strand', 'com.cultureblocs.annotation'] ; },
-    async listRecords(type) { return structuredClone(records.filter((r) => r.type === type)); },
+    async listDays() {
+      calls.push('listDays');
+      const days = new Map();
+      for (const r of records) days.set(dayOf(r), (days.get(dayOf(r)) || 0) + 1);
+      return [...days].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([day, count]) => ({ day, count }));
+    },
+    async listRecordsForDay(day) {
+      calls.push(`listRecordsForDay ${day}`);
+      return structuredClone(records.filter((r) => dayOf(r) === day));
+    },
     async getRecord(id) {
       const rec = records.find((r) => r.id === id);
       if (!rec) throw new Error(`HTTP 404 for record ${id}`);
@@ -35,7 +46,7 @@ export function fakeString({ records = [], media = {}, failMedia = new Set(), re
       return { uri: `/media/${name}`, mime: blob.type, bytes: blob.size };
     },
   };
-  return { client, records, media, posted };
+  return { client, records, media, posted, calls };
 }
 
 export const photo = (text = 'jpeg-bytes', type = 'image/jpeg') => new Blob([text], { type });

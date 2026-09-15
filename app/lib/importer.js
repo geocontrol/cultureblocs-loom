@@ -15,7 +15,7 @@
  * Every write re-reads the local record first: the network awaits in between
  * give another tab time to save, and a stale snapshot must never undo that. */
 import { contentHash } from '../vendor/strip.js';
-import { dayOf, recordKey, toLoomItems } from './keys.js';
+import { dayOf, idFromSpineUri, recordKey, toLoomItems } from './keys.js';
 import { hashFromName, mediaNames } from './media.js';
 
 const STRAND = 'com.cultureblocs.strand';
@@ -54,9 +54,12 @@ export async function planImport(stringRecords, localByStringId, localByKey = ne
 
 export async function runImport({ store, registry, client, now = () => Date.now(), onProgress = () => {} }) {
   const iso = () => new Date(now()).toISOString();
-  const types = (await client.health()).filter((t) => registry.recordTypes().includes(t));
+  const types = new Set((await client.health()).filter((t) => registry.recordTypes().includes(t)));
+  // Day by day: each day is far under the String's per-request limit (the client fails loudly if one is not).
   const stringRecords = [];
-  for (const type of types) stringRecords.push(...await client.listRecords(type));
+  for (const { day } of await client.listDays()) {
+    stringRecords.push(...(await client.listRecordsForDay(day)).filter((r) => types.has(r.type)));
+  }
 
   const all = await store.allRecords();
   const locals = new Map(all.filter((r) => r.stringId).map((r) => [r.stringId, r]));
@@ -146,8 +149,21 @@ export async function runImport({ store, registry, client, now = () => Date.now(
     if (!cur) continue;
     const referenced = new Set(mediaNames(cur.body));
     const left = still.filter((n) => referenced.has(n));
+    counts.missing += left.length;
     const { missing: _, ...rest } = cur;
     await store.putRecord(left.length ? { ...rest, missing: left } : rest);   // only `missing` changes
+  }
+  // A strand imported before one of its members keeps that item as spine://.
+  // Now the member may be held: rewrite strands nobody has changed in Loom.
+  const held = await store.allRecords();
+  const heldByStringId = new Map(held.filter((r) => r.stringId).map((r) => [r.stringId, r.key]));
+  for (const r of held) {
+    if (r.type !== STRAND || !r.stringId || !Array.isArray(r.body?.items)) continue;
+    if (!r.body.items.some((it) => heldByStringId.has(idFromSpineUri(it?.uri)))) continue;
+    const cur = await store.getRecord(r.key);
+    if (!cur || (await contentHash(cur.body)) !== cur.importedHash) continue;   // changed locally: leave it
+    const body = toLoomItems(cur.body, heldByStringId);
+    await store.putRecord({ ...cur, body, updatedAt: iso(), importedHash: await contentHash(body) });
   }
   await store.setMeta('lastImportAt', iso());
   return { counts, conflicts };

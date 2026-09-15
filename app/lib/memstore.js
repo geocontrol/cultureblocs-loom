@@ -11,8 +11,9 @@ export function createMemStore() {
     async allRecords() { return [...records.values()].map(clone); },
     async recordsByDay(day) { return [...records.values()].filter((r) => r.day === day).map(clone); },
     async recordByStringId(id) { return clone([...records.values()].find((r) => r.stringId === id)); },
-    async getBlob(hash) { return blobs.get(hash); },
-    async putBlob(row) { blobs.set(row.hash, row); },
+    // Rows hold an immutable Blob, so a shallow copy is a full one (IndexedDB clones too).
+    async getBlob(hash) { const row = blobs.get(hash); return row && { ...row }; },
+    async putBlob(row) { blobs.set(row.hash, { ...row }); },
     async deleteBlob(hash) { blobs.delete(hash); },
     async blobHashes() { return [...blobs.keys()]; },
     async getMeta(k) { return clone(meta.get(k)); },

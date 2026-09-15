@@ -29,6 +29,13 @@ export function panelView(s) {
       <p>Everything in this browser in one file (not the token). Last backup: ${when(s.lastBackupAt)}.</p>
       <button type="button" data-action="backup">download backup</button>
       <label class="file">restore from a backup <input type="file" accept="application/json" data-action="restore"></label>
+      ${s.pendingRestore ? html`<div class="confirm" role="alertdialog" aria-label="confirm restore">
+        <p>Restoring ${s.pendingRestore.fileName || 'this file'} replaces ${s.pendingRestore.records} record${s.pendingRestore.records === 1 ? '' : 's'} in this browser (${s.pendingRestore.unsent} not yet sent to the String) with the file's ${s.pendingRestore.incoming}.
+          Anything not in the file is gone for good.</p>
+        <button type="button" data-action="backup">download a backup first</button>
+        <button type="button" data-action="restore-confirm">replace with the file</button>
+        <button type="button" data-action="restore-cancel">cancel</button>
+      </div>` : ''}
 
       <h3>This browser</h3>
       <p>${s.persisted ? 'Storage is persistent.' : 'Storage is not marked persistent: the browser may clear it under pressure. Back up.'}</p>

@@ -53,7 +53,15 @@ export async function openStore(indexedDB = globalThis.indexedDB, name = DB) {
     deleteMeta: (k) => run('meta', 'readwrite', (s) => { s.delete(k); }),
     allMeta: async () => Object.fromEntries(
       (await run('meta', 'readonly', (s) => s.getAll())).map(({ k, v }) => [k, v])),
-    clear: () => Promise.all(['records', 'blobs', 'meta'].map((n) => run(n, 'readwrite', (s) => { s.clear(); }))),
+    /* One transaction over all three stores: they empty together or not at all. */
+    clear: () => new Promise((resolve, reject) => {
+      const names = ['records', 'blobs', 'meta'];
+      const t = db.transaction(names, 'readwrite');
+      names.forEach((n) => t.objectStore(n).clear());
+      t.oncomplete = () => resolve();
+      t.onerror = () => reject(t.error);
+      t.onabort = () => reject(t.error || new Error('transaction aborted'));
+    }),
     close: () => db.close(),
   };
 }
