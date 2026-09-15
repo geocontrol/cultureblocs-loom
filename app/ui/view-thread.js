@@ -3,6 +3,8 @@ import { isUnsent } from '../lib/day.js';
 import { nameFromUri } from '../lib/media.js';
 import { html } from './html.js';
 
+const BEAD = 'com.cultureblocs.bead';
+
 export const KINDS = ['bloc', 'visit', 'dwell', 'encounter', 'read', 'listen', 'watch', 'screening', 'performance', 'note'];
 
 const hhmm = (iso) => (typeof iso === 'string' ? iso.slice(11, 16) : '');
@@ -49,8 +51,8 @@ function bead(r, urls) {
       <div class="chips">${chips(r)}</div>
       ${photos(r, urls)}
       <div class="tools">
-        <a href="#/compose/${r.key}">edit</a>
-        ${r.type.endsWith('bead') ? html`<a href="#/compose/new?day=${r.day}&wrap=${r.key}">tell this</a>` : ''}
+        ${r.type === BEAD ? html`<a href="#/compose/${r.key}">edit</a>
+          <a href="#/compose/new?day=${r.day}&wrap=${r.key}">tell this</a>` : ''}
         ${proposal ? html`<button data-action="keep">keep</button><button data-action="release">release</button>` : ''}
       </div>
     </li>`;

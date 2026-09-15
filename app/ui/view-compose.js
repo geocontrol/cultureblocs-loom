@@ -82,6 +82,22 @@ export function composeView(state) {
     </form>`;
 }
 
+/* Records Compose does not edit in Phase 1: annotations (the AR app owns them)
+ * and other imported types, and released proposals awaiting sync. */
+export function readOnlyView(record) {
+  const b = record.body || {};
+  const why = record.state === 'released'
+    ? 'You released this proposal. It stays in this browser only until sync (Phase 2) tells the String.'
+    : `${record.type.endsWith('annotation') ? 'Annotations arrive from the AR app' : 'Records of this type arrive from other apps'}; they are read-only in Loom for now.`;
+  return html`
+    <section class="readonly">
+      <h2>${record.type.split('.').pop()} · ${record.day || ''}</h2>
+      <p>${why}</p>
+      ${typeof b.note === 'string' ? html`<p class="note">${b.note}</p>` : ''}
+      <p><a href="#/thread/${record.day || ''}">back to the day</a></p>
+    </section>`;
+}
+
 export const problemsView = (problems) =>
   html`${problems.length ? html`<ul class="problems">${problems.map((p) => html`<li>${p}</li>`)}</ul>` : ''}`;
 

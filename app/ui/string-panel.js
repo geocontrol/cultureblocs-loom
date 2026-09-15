@@ -5,6 +5,7 @@ import { isLoomOnly, isUnsent } from '../lib/day.js';
 import { runImport } from '../lib/importer.js';
 import { planSend, runSend } from '../lib/sender.js';
 import { stringClient } from '../lib/string-client.js';
+import { errorLine, surfaceErrors } from './html.js';
 import { panelView } from './view-panel.js';
 
 async function localChangeCount(records) {
@@ -18,7 +19,7 @@ async function localChangeCount(records) {
 }
 
 export async function mountPanel(root, ctx) {
-  const s = { check: '', importResult: '', sendResults: [], busy: false };
+  const s = { check: '', importResult: '', sendResults: [], busy: false, error: '' };
 
   async function render() {
     const records = await ctx.store.allRecords();
@@ -34,7 +35,7 @@ export async function mountPanel(root, ctx) {
       localChanges: await localChangeCount(records),
       persisted: await ctx.persisted(),
     });
-    root.innerHTML = String(panelView(s));
+    root.innerHTML = String(errorLine(s.error)) + String(panelView(s));
   }
 
   const client = () => stringClient(s.stringUrl || 'http://localhost:8100', s.stringToken, ctx.fetch);
@@ -47,6 +48,7 @@ export async function mountPanel(root, ctx) {
 
   async function onClick(e) {
     const action = e.target.closest?.('button[data-action]')?.dataset.action;
+    if (action) s.error = '';
     if (action === 'check') {
       try { s.check = `a String, holding ${(await client().health()).length} record types`; }
       catch (err) { s.check = err.message; }
@@ -112,8 +114,10 @@ export async function mountPanel(root, ctx) {
     }
   }
 
-  root.addEventListener('click', onClick);
-  root.addEventListener('change', onChange);
+  const show = async (message) => { s.error = message; s.busy = false; await render(); };
+  const click = surfaceErrors(onClick, show), change = surfaceErrors(onChange, show);
+  root.addEventListener('click', click);
+  root.addEventListener('change', change);
   await render();
-  return { render, unmount() { root.removeEventListener('click', onClick); root.removeEventListener('change', onChange); } };
+  return { render, unmount() { root.removeEventListener('click', click); root.removeEventListener('change', change); } };
 }

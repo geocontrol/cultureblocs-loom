@@ -19,3 +19,12 @@ export function html(strings, ...values) {
   values.forEach((v, i) => { out += part(v) + strings[i + 1]; });
   return new Safe(out);
 }
+
+/* The one error surface: a status line each controller renders at its top. */
+export const errorLine = (message) => html`${message ? html`<p class="error" role="alert">${message}</p>` : ''}`;
+
+/* An async event handler whose failure is shown through `show(message)`
+ * rather than lost as an unhandled rejection. */
+export const surfaceErrors = (handler, show) => async (e) => {
+  try { await handler(e); } catch (err) { await show(err?.message || String(err)); }
+};

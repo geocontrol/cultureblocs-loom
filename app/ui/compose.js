@@ -4,12 +4,12 @@
  * updatedAt it was typed against); Save goes through the envelope's validation
  * gate, after any draft write in flight, so no draft outlives the save. */
 import { reanchor, selectionToIndex } from '../lib/anchors.js';
-import { Conflict, STRAND, isAbandonable } from '../lib/envelope.js';
+import { BEAD, Conflict, STRAND, isAbandonable } from '../lib/envelope.js';
 import { preparePhoto } from '../lib/images.js';
 import { itemUri } from '../lib/keys.js';
 import { mediaNames, putPhoto } from '../lib/media.js';
-import { html } from './html.js';
-import { bodyFromFields, composeView, problemsView } from './view-compose.js';
+import { errorLine, html, surfaceErrors } from './html.js';
+import { bodyFromFields, composeView, problemsView, readOnlyView } from './view-compose.js';
 import { publishHint, refFromFields } from './view-refs.js';
 
 export async function newStrand(ctx, { day, wrap }) {
@@ -28,13 +28,16 @@ export async function newStrand(ctx, { day, wrap }) {
 }
 
 const textField = (type) => (type === STRAND ? 'narrative' : 'note');
+const EDITABLE = [BEAD, STRAND];
 
 export async function mountCompose(root, ctx, { key }) {
   let record = await ctx.store.getRecord(key);
-  if (!record) { root.textContent = `No record ${key}.`; return { render() {}, async flush() {}, unmount() {} }; }
+  const inert = { render() {}, async flush() {}, unmount() {} };
+  if (!record) { root.textContent = `No record ${key}.`; return inert; }
+  if (!EDITABLE.includes(record.type) || record.state === 'released') { root.innerHTML = String(readOnlyView(record)); return inert; }
   const draft = await ctx.loom.getDraft(key);
   const state = { record, body: structuredClone(draft?.body ?? record.body), conflict: null, dayBeads: [], urls: new Map(),
-    restoredDraftAt: draft?.at ?? null, discardArmed: false };
+    restoredDraftAt: draft?.at ?? null, discardArmed: false, error: '' };
   // The updatedAt the body in the editor was typed against. For a restored draft
   // it is the draft's own, so saving it over a record changed since is a Conflict;
   // a draft written before drafts carried one (null) always asks.
@@ -56,7 +59,7 @@ export async function mountCompose(root, ctx, { key }) {
   async function render() {
     if (gone) return;
     await loadContext();
-    root.innerHTML = String(composeView({ ...state, record, problems: problems() }));
+    root.innerHTML = String(html`<div class="status-slot">${errorLine(state.error)}</div>${composeView({ ...state, record, problems: problems() })}`);
   }
 
   function refreshInPlace() {
@@ -70,13 +73,25 @@ export async function mountCompose(root, ctx, { key }) {
     });
   }
 
-  /* Draft writes run one after another; `draftWrite` is the last one. */
+  /* Show an error without a full re-render (typing keeps its focus). */
+  function showError(message) {
+    state.error = message;
+    const slot = root.querySelector('.status-slot');
+    if (slot) slot.innerHTML = String(errorLine(message));
+  }
+
+  /* Draft writes run one after another; `draftWrite` is the last one. A failed
+   * write is shown and leaves the editor dirty, the edit still in memory. */
   function writeDraft() {
     saveTimer = null;
     const body = structuredClone(state.body), against = base;
     draftWrite = draftWrite.then(async () => {
-      await ctx.loom.saveDraft(record.key, body, against);
-      if (!saveTimer) ctx.setDirty(false);
+      try {
+        await ctx.loom.saveDraft(record.key, body, against);
+        if (!saveTimer) ctx.setDirty(false);
+      } catch (err) {
+        showError(`draft not saved: ${err.message} — your changes are still here; back up from the string panel`);
+      }
     });
     return draftWrite;
   }
@@ -157,6 +172,7 @@ export async function mountCompose(root, ctx, { key }) {
     if (!button) return;
     const action = button.dataset.action;
     if (action !== 'discard') state.discardArmed = false;
+    state.error = '';
     const refIndex = Number(button.closest('[data-ref]')?.dataset.ref);
     const itemIndex = Number(button.closest('[data-item]')?.dataset.item);
     const items = state.body.items || [];
@@ -222,17 +238,22 @@ export async function mountCompose(root, ctx, { key }) {
     await render();
   }
 
+  const show = async (message) => { state.error = message; await render(); };
+  const click = surfaceErrors(onClick, show), change = surfaceErrors(onChange, show);
+  const submit = (e) => e.preventDefault();       // no inline handler: the CSP forbids them
   root.addEventListener('input', onInput);
-  root.addEventListener('click', onClick);
-  root.addEventListener('change', onChange);
+  root.addEventListener('click', click);
+  root.addEventListener('change', change);
+  root.addEventListener('submit', submit);
   await render();
   return {
     render,
     flush,
     unmount() {
       root.removeEventListener('input', onInput);
-      root.removeEventListener('click', onClick);
-      root.removeEventListener('change', onChange);
+      root.removeEventListener('click', click);
+      root.removeEventListener('change', change);
+      root.removeEventListener('submit', submit);
       return flush();
     },
   };

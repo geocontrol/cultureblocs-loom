@@ -93,3 +93,12 @@ test('panelView shows counts and disables send when nothing is sendable', () => 
   assert.match(out, /2 local changes/);
   assert.match(out, /not marked persistent/);
 });
+
+test('annotations get no edit link in Thread: they are read-only in Phase 1', () => {
+  const A = 'com.cultureblocs.annotation';
+  const ann = { key: `${A}/u1`, type: A, state: 'kept', sourceApp: 'ar', createdAt: '2026-09-14T10:00:00Z', day: '2026-09-14',
+    body: { $type: A, note: 'seen through the glass' } };
+  const out = String(dayView([{ kind: 'item', record: ann }, { kind: 'item', record: bead(`${B}/b`) }], { day: '2026-09-14' }));
+  assert.doesNotMatch(out, new RegExp(`href="#/compose/${A}/u1"`));
+  assert.match(out, new RegExp(`href="#/compose/${B}/b"`));
+});

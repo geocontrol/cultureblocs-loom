@@ -195,3 +195,67 @@ test('the panel counts drafts apart from unsent records, and send is off when no
   assert.match(root.innerHTML, /1 draft not sent/);
   assert.match(root.innerHTML, /data-action="send" disabled/);
 });
+
+test('an annotation, or a released tombstone, opens read-only in Compose', async () => {
+  const ctx = await context();
+  const A = 'com.cultureblocs.annotation';
+  await ctx.store.putRecord({ key: `${A}/u1`, type: A, rkey: 'u1', state: 'kept', origin: 'import', sourceApp: 'ar',
+    createdAt: '2026-09-14T10:00:00Z', day: '2026-09-14', stringId: 'u1', body: { $type: A, note: 'from the AR app' } });
+  const root = fakeRoot();
+  const c = await mountCompose(root, ctx, { key: `${A}/u1` });
+  assert.match(root.innerHTML, /read-only/);
+  assert.doesNotMatch(root.innerHTML, /<form/);
+  await c.flush();
+  const bead = await ctx.loom.mint({ note: 'x' });
+  await ctx.store.putRecord({ ...bead, state: 'released', stringId: 's1' });
+  const r2 = fakeRoot();
+  await mountCompose(r2, ctx, { key: bead.key });
+  assert.doesNotMatch(r2.innerHTML, /<form/);
+});
+
+const alertIn = (root) => /<p class="error" role="alert">/.test(root.innerHTML);
+
+test('mint ignores a second press while the first is still minting', async () => {
+  const ctx = await context();
+  const root = fakeRoot();
+  await mountMint(root, ctx);
+  await Promise.all([root.fire('click', button('press')), root.fire('click', button('press'))]);
+  assert.equal((await ctx.store.allRecords()).length, 1);
+});
+
+test('a keep that lost a race with another tab shows why, instead of throwing', async () => {
+  const ctx = await context();
+  const bead = await ctx.loom.mint({ note: 'hello' });
+  await ctx.store.putRecord({ ...bead, key: 'com.cultureblocs.bead/p', rkey: 'p', state: 'proposal' });
+  const day = fakeRoot();
+  await mountThread(day, ctx, { period: bead.day });
+  await ctx.loom.keep('com.cultureblocs.bead/p');                 // the other tab
+  await day.fire('click', button('keep', {}, { '[data-key]': { dataset: { key: 'com.cultureblocs.bead/p' } } }));
+  assert.ok(alertIn(day));
+  assert.match(day.innerHTML, /a kept record cannot become kept/);
+});
+
+test('compose shows a save that fails, and a photo that cannot be read, in its status line', async () => {
+  const ctx = await context();
+  const bead = await ctx.loom.mint({ note: 'x' });
+  ctx.loom = { ...ctx.loom, async save() { throw new Error('QuotaExceededError: the disk is full'); } };
+  const root = fakeRoot();
+  await mountCompose(root, ctx, { key: bead.key });
+  await root.fire('click', button('add-ref'));
+  await root.fire('click', button('save'));
+  assert.ok(alertIn(root));
+  assert.match(root.innerHTML, /the disk is full/);
+  assert.match(root.innerHTML, /data-action="remove-ref"/, 'the unsaved edit is still in the editor');
+  await root.fire('change', { dataset: { action: 'photo-add' }, files: [new Blob(['not an image'])] });
+  assert.ok(alertIn(root));
+});
+
+test('the panel shows a failed backup in its status line', async () => {
+  const ctx = await context();
+  ctx.store = { ...ctx.store, async blobHashes() { throw new Error('storage is gone'); } };
+  const root = fakeRoot();
+  await mountPanel(root, ctx);
+  await root.fire('click', button('backup'));
+  assert.ok(alertIn(root));
+  assert.match(root.innerHTML, /storage is gone/);
+});

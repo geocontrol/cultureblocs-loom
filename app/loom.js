@@ -55,6 +55,15 @@ async function boot() {
   }
 
   async function route() {
+    try {
+      await routeNow();
+    } catch (err) {
+      $('#main').textContent = `Could not open this page: ${err.message}`;
+      console.error(err);
+    }
+  }
+
+  async function routeNow() {
     for (const m of mounted) m.unmount?.();
     mounted = [];
     const posture = await applyPosture();
