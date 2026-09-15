@@ -71,7 +71,7 @@ test('a new bead is typed in full and written once, on save; nothing exists befo
   const key = ctx.loom.newKey(BEAD);
   const root = fakeRoot([field('kind', 'visit'), field('text', 'Rothko room, almost empty.'), field('tags', 'art, tate'),
     field('place', 'Tate Modern'), field('links', 'https://tate.test | Tate')]);
-  await mountEditor(root, ctx, { key });
+  await mountEditor(root, ctx, { key, isNew: true });
   assert.match(root.innerHTML, /New bead/);
   await root.fire('input', root.fields[1]);
   await sleep(600);
@@ -93,7 +93,7 @@ test('a bead whose time was set, or that was opened for a day, is not anchored t
   const key = ctx.loom.newKey(BEAD);
   const when = field('when', '2026-09-10T20:15');
   const root = fakeRoot([field('kind', 'watch'), when]);
-  await mountEditor(root, ctx, { key });
+  await mountEditor(root, ctx, { key, isNew: true });
   await root.fire('input', when);
   await root.fire('click', button('save'));
   const saved = await ctx.store.getRecord(key);
@@ -102,7 +102,7 @@ test('a bead whose time was set, or that was opened for a day, is not anchored t
 
   const dayKey = ctx.loom.newKey(BEAD);
   const dayRoot = fakeRoot([field('kind', 'read')]);
-  await mountEditor(dayRoot, ctx, { key: dayKey, day: '2026-09-01' });
+  await mountEditor(dayRoot, ctx, { key: dayKey, day: '2026-09-01', isNew: true });
   await dayRoot.fire('click', button('save'));
   assert.equal((await ctx.store.getRecord(dayKey)).body.provenance.timeAnchored, false);
 });
@@ -111,7 +111,7 @@ test('a new form with problems cannot save, and says why', async () => {
   const ctx = await context();
   const key = ctx.loom.newKey(BEAD);
   const root = fakeRoot([field('kind', 'bloc'), field('text', 'x'.repeat(3001))]);
-  await mountEditor(root, ctx, { key });
+  await mountEditor(root, ctx, { key, isNew: true });
   await root.fire('input', root.fields[1]);
   await root.fire('click', button('save'));
   assert.match(root.innerHTML, /record is not valid/);
@@ -122,7 +122,7 @@ test('discarding a new record’s draft leaves nothing behind and goes back to t
   const ctx = await context();
   const key = ctx.loom.newKey(BEAD);
   const root = fakeRoot([field('text', 'half')]);
-  await mountEditor(root, ctx, { key, day: '2026-09-14' });
+  await mountEditor(root, ctx, { key, day: '2026-09-14', isNew: true });
   await root.fire('input', root.fields[0]);
   await sleep(600);
   await root.fire('click', button('discard'));
@@ -166,7 +166,7 @@ test('while a strand is open, ticking beads adds and removes its items; a ticked
   await ctx.store.putRecord({ ...p, state: 'proposal' });
   const key = ctx.loom.newKey(STRAND);
   const root = fakeRoot([field('title', 'Sunday')]);
-  const editor = await mountEditor(root, ctx, { key });
+  const editor = await mountEditor(root, ctx, { key, isNew: true });
   assert.ok(ctx.desk.tick);
   await ctx.desk.tick.toggle(a.key, true);
   await ctx.desk.tick.toggle(p.key, true);
@@ -282,6 +282,63 @@ test('an annotation opens read-only; a record waiting to be deleted offers undo'
   await root.fire('click', button('undo-delete'));
   assert.equal('deleted' in (await ctx.store.getRecord(bead.key)), false);
   assert.match(root.innerHTML, /<h2>Bead<\/h2>/);
+});
+
+test('opening a key with no record, no draft and no new flag — a record just deleted — does not open an empty new form', async () => {
+  const ctx = await context();
+  const key = ctx.loom.newKey(BEAD);
+  const root = fakeRoot([field('text', 'typed into nothing')]);
+  await mountEditor(root, ctx, { key });
+  assert.equal(root.textContent, 'This record is no longer in this browser.');
+  assert.doesNotMatch(root.innerHTML, /New bead/);
+  await root.fire('input', root.fields[0]);
+  await sleep(600);
+  assert.deepEqual(await ctx.loom.newDrafts(), [], 'nothing typed there becomes a draft');
+});
+
+test('ticking in the column after a new strand’s draft was discarded brings nothing back', async () => {
+  const ctx = await context();
+  const a = await makeBead(ctx.loom, { note: 'a' });
+  const key = ctx.loom.newKey(STRAND);
+  const root = fakeRoot([field('title', 'Sunday')]);
+  await mountEditor(root, ctx, { key, isNew: true });
+  const tick = ctx.desk.tick;
+  await tick.toggle(a.key, true);
+  await root.fire('click', button('discard'));
+  assert.deepEqual(await ctx.loom.newDrafts(), []);
+  await tick.toggle(a.key, true);                     // the column still holds the tick until the route unmounts
+  await sleep(600);
+  assert.deepEqual(await ctx.loom.newDrafts(), [], 'the discarded draft does not come back');
+});
+
+test('a record deleted here and in conflict shows the conflict and the form without save or delete', async () => {
+  const ctx = await context();
+  const bead = await makeBead(ctx.loom, { note: 'mine' });
+  await ctx.store.putRecord({ ...bead, stringId: 's1', importedHash: 'x', importedState: 'kept' });
+  await ctx.loom.remove(bead.key);
+  const deleted = await ctx.store.getRecord(bead.key);
+  await ctx.store.putRecord({ ...deleted, conflict: { theirs: { id: 's1', hlc: 'h', state: 'kept', body: { ...bead.body, note: 'theirs' } }, reason: 'import' } });
+  const root = fakeRoot();
+  await mountEditor(root, ctx, { key: bead.key });
+  assert.match(root.innerHTML, /You deleted this here[\s\S]*delete it anyway/);
+  assert.match(root.innerHTML, />mine<\/textarea>/);
+  assert.doesNotMatch(root.innerHTML, /data-action="save"/);
+  assert.doesNotMatch(root.innerHTML, /data-action="delete"/);
+});
+
+test('settings ignores import while a Send is running', async () => {
+  const ctx = await context();
+  await ctx.store.setMeta('stringUrl', 'http://string.test');
+  const asked = [];
+  ctx.fetch = async (url) => { asked.push(url); throw new TypeError('Failed to fetch'); };
+  const root = fakeRoot();
+  await mountSettings(root, ctx);
+  ctx.desk.busy = true;
+  await mountSettings(root, ctx);
+  assert.match(root.innerHTML, /data-action="import" disabled/);
+  await root.fire('click', button('import'));
+  assert.deepEqual(asked, [], 'no import started');
+  assert.doesNotMatch(root.innerHTML, /Failed to fetch/);
 });
 
 test('typing updates problems in place without throwing', async () => {

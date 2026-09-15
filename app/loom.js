@@ -4,11 +4,14 @@
  *
  *   #/                    today, at a glance
  *   #/day/<YYYY-MM-DD>    a day, at a glance
- *   #/new/bead?day=…      reserve a key, then #/edit/<key>
+ *   #/new/bead?day=…      reserve a key, then #/edit/<key>?new=1&day=…
  *   #/new/strand?day=…    the same, for a strand
  *   #/edit/<key>?day=…    the form for a record, or for a new one not yet saved
+ *                         (a key with neither record nor draft opens a form only with new=1)
  *   #/send                what is waiting, and the last Send's results
  *   #/settings            String address and token, import, backup, restore
+ *
+ * Phase 1 addresses (#/thread, #/mint, #/compose, #/string) redirect here (lib/routing.js).
  *
  * On a narrow screen the page shows one column at a time: the String for #/
  * and #/day, the editor for everything else (body[data-view], loom.css). */
@@ -16,7 +19,7 @@ import { BEAD, STRAND, openLoom } from './lib/envelope.js';
 import { loadRegistry } from './lib/lexicons.js';
 import { hashFromName } from './lib/media.js';
 import { migrateStore } from './lib/migrate.js';
-import { routeSerializer } from './lib/routing.js';
+import { phase1Redirect, routeSerializer } from './lib/routing.js';
 import { openStore } from './lib/store.js';
 import { mountEditor } from './ui/editor.js';
 import { mountDay, mountSend, mountTopbar } from './ui/pages.js';
@@ -73,7 +76,7 @@ async function boot() {
     desk: {
       results: [], busy: false, tick: null,
       refreshColumn: () => column?.render().catch((err) => console.error(err)),
-      refresh: () => { topbar?.render().catch((err) => console.error(err)); mounted.forEach((m) => m.render?.()); },
+      refresh: () => { topbar?.render().catch((err) => console.error(err)); mounted.forEach((m) => m.render?.()?.catch?.((err) => console.error(err))); },
     },
   };
 
@@ -91,6 +94,11 @@ async function boot() {
     await Promise.all(mounted.map((m) => m.unmount?.()));
     mounted = [];
     if (!current.current) return;
+    const old = phase1Redirect(location.hash);
+    if (old) {
+      location.replace(old);                          // a Phase 1 bookmark: the desk's nearest surface
+      return;
+    }
     const [path, query = ''] = location.hash.replace(/^#\/?/, '').split('?');
     const [surface = '', ...rest] = path.split('/');
     const arg = decodeURIComponent(rest.join('/'));
@@ -99,7 +107,7 @@ async function boot() {
 
     if (surface === 'new' && NEW[arg]) {
       const day = params.get('day');
-      location.replace(`#/edit/${loom.newKey(NEW[arg])}${day ? `?day=${day}` : ''}`);
+      location.replace(`#/edit/${loom.newKey(NEW[arg])}?new=1${day ? `&day=${day}` : ''}`);
       return;
     }
     // Each route renders into its own container: a route overtaken mid-mount
@@ -116,7 +124,7 @@ async function boot() {
       const record = await store.getRecord(arg);
       if (!current.current) return;
       await column.show({ day: record?.day || params.get('day') || '', key: arg });
-      current.keep(await mountEditor(pane, ctx, { key: arg, day: params.get('day') || '' }), mounted);
+      current.keep(await mountEditor(pane, ctx, { key: arg, day: params.get('day') || '', isNew: params.get('new') === '1' }), mounted);
     } else if (surface === 'send') {
       current.keep(await mountSend(pane, ctx), mounted);
     } else if (surface === 'settings') {

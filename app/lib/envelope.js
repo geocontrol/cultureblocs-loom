@@ -10,7 +10,7 @@
  * (`draft:<key>` in meta, under a key reserved when its form opened). */
 import { anchorProblems } from '../vendor/refs.js';
 import { createClock } from './hlc.js';
-import { dayOf, itemUri, recordKey } from './keys.js';
+import { dayOf, itemUri, recordKey, same } from './keys.js';
 import { mediaNames } from './media.js';
 import { tidGenerator } from './tid.js';
 
@@ -43,7 +43,6 @@ export function whyNotDeletable(r) {
 }
 
 const list = (v) => (Array.isArray(v) ? v : []);   // imported bodies are not validated: guard their shape
-const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const randomDeviceId = () => `loom-${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}`;
 
 export async function openLoom({ store, registry, now = () => Date.now(), newDeviceId = randomDeviceId, nowMicros }) {
@@ -159,15 +158,20 @@ export async function openLoom({ store, registry, now = () => Date.now(), newDev
     /* Delete a record (releasing a proposal is the same act). One never on the
      * String goes now; one on the String is marked `deleted` until Send deletes
      * it there. Strands that use a deleted bead lose that item (validated and
-     * stamped, their state untouched). Returns the keys of the strands changed. */
+     * stamped, their state untouched; all are checked before any is written).
+     * Returns the keys of the strands changed. */
     async remove(key) {
       const current = await store.getRecord(key);
       const why = whyNotDeletable(current);
       if (why) throw new Error(`cannot delete ${key}: ${why}`);
-      const changed = [];
-      for (const s of await strandsUsing(key)) {
+      // Every strand is checked before any is written: one that refuses leaves all as they were.
+      const rewrites = (await strandsUsing(key)).map((s) => {
         const body = { ...s.body, items: list(s.body.items).filter((it) => it?.uri !== itemUri(key)) };
         check(STRAND, body);
+        return [s, body];
+      });
+      const changed = [];
+      for (const [s, body] of rewrites) {
         await rewrite(s, { body });
         changed.push(s.key);
       }

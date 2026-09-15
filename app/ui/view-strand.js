@@ -4,18 +4,17 @@
 import { summary } from '../lib/day.js';
 import { keyFromItemUri } from '../lib/keys.js';
 import { html } from './html.js';
-import { footerView, linksText, list, placeName, problemsView, provenanceView, restoredView } from './view-form.js';
+import { footerView, hhmm, linksText, list, placeName, problemsView, provenanceView, restoredView } from './view-form.js';
 import { refsView } from './view-refs.js';
 
 const STRAND = 'com.cultureblocs.strand';
-const hhmm = (iso) => (typeof iso === 'string' ? iso.slice(11, 16) : '');
 
-/* state: { record, body, problems, members: Map key -> record, restoredDraftAt, dirtyDraft } */
+/* state: { record, body, problems, members: Map key -> record, restoredDraftAt, dirtyDraft, locked } */
 export function strandFormView(state) {
-  const { record = null, body, problems = [], members = new Map(), restoredDraftAt = null, dirtyDraft = false } = state;
+  const { record = null, body, problems = [], members = new Map(), restoredDraftAt = null, dirtyDraft = false, locked = false } = state;
   const items = list(body.items);
   return html`
-    <form class="editor" data-type="${STRAND}">
+    <form class="editor" data-type="${STRAND}" ${locked ? 'inert' : ''}>
       <header><h2>${record ? 'Strand' : 'New strand'}</h2></header>
       ${restoredView(restoredDraftAt)}
       <div class="row">
@@ -40,6 +39,6 @@ export function strandFormView(state) {
       <fieldset><legend>refs — what this is about</legend>${refsView(body.refs, body.narrative || '')}</fieldset>
       ${provenanceView(record)}
       <div class="problems-slot">${problemsView(problems)}</div>
-      ${footerView({ record, problems, dirtyDraft })}
+      ${footerView({ record, problems, dirtyDraft, locked })}
     </form>`;
 }

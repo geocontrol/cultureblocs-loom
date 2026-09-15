@@ -7,6 +7,8 @@ import { html } from './html.js';
 const STRAND = 'com.cultureblocs.strand';
 export const list = (v) => (Array.isArray(v) ? v : []);   // imported bodies are not validated: guard their shape
 const str = (v) => (typeof v === 'string' ? v : '');
+/* The time of day an ISO datetime names, as stored (hh:mm). */
+export const hhmm = (iso) => (typeof iso === 'string' ? iso.slice(11, 16) : '');
 
 export const KINDS = ['bloc', 'visit', 'dwell', 'encounter', 'read', 'listen', 'watch', 'screening', 'performance', 'note'];
 
@@ -59,8 +61,9 @@ export function provenanceView(record) {
 export const problemsView = (problems = []) =>
   html`${problems.length ? html`<ul class="problems">${problems.map((p) => html`<li>${p}</li>`)}</ul>` : ''}`;
 
-/* state: { record, problems, dirtyDraft, confirmDelete } */
-export function footerView({ record = null, problems = [], dirtyDraft = false }) {
+/* state: { record, problems, dirtyDraft, locked } — `locked` (a deleted record in conflict) offers nothing */
+export function footerView({ record = null, problems = [], dirtyDraft = false, locked = false }) {
+  if (locked) return html`<footer><p class="hint">Deleted here: choose a version above.</p></footer>`;
   return html`
     <footer>
       <button type="button" class="primary" data-action="save" ${problems.length ? 'disabled' : ''}>save</button>

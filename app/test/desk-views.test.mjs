@@ -98,6 +98,8 @@ test('provenance, footer and read-only views', () => {
   assert.match(String(provenanceView(bead('k', { body: {} }))), /made in loom · only in this browser/);
   assert.doesNotMatch(String(footerView({ record: null })), /discard/);
   assert.match(String(footerView({ record: null, dirtyDraft: true })), /discard this draft/);
+  assert.doesNotMatch(String(footerView({ record: bead('k'), dirtyDraft: true, locked: true })), /data-action/);
+  assert.match(String(beadFormView({ record: bead('k'), body: bead('k').body, locked: true })), /<form class="editor" data-type="[^"]+" inert>/);
   assert.match(String(readOnlyView({ type: 'com.cultureblocs.annotation', day: '2026-09-14', body: { note: '<x>' } })), /Annotations arrive from the AR app[\s\S]*&lt;x&gt;/);
 });
 

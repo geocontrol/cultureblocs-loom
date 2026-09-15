@@ -32,6 +32,7 @@ export async function mountSettings(root, ctx) {
       try { s.check = `a String, holding ${(await client().health()).length} record types`; }
       catch (err) { s.check = err.message; }
     } else if (action === 'import') {
+      if (s.busy || ctx.desk.busy) return;             // a Send (or an import) is still writing: the button shows disabled
       s.busy = true;
       await render();
       try {

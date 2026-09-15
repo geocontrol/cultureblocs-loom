@@ -2,7 +2,11 @@
  *
  * In Loom a strand's items reference local keys, loom://<nsid>/<rkey>; on the
  * String they reference spine://records/<id>. Import rewrites one way, send the
- * other (see importer.js and sender.js). */
+ * other (see importer.js and sender.js). `same` is the JSON comparison the
+ * lib modules share. */
+
+/* Two JSON values are the same (absent and null alike): provenance, a conflict's fields. */
+export const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 export const recordKey = (type, rkey) => `${type}/${rkey}`;
 

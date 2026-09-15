@@ -22,13 +22,11 @@
  * Every write re-reads the local record first: the network awaits in between
  * give another tab time to save, and a stale snapshot must never undo that. */
 import { contentHash } from '../vendor/strip.js';
-import { dayOf, idFromSpineUri, recordKey, toLoomItems } from './keys.js';
+import { dayOf, idFromSpineUri, recordKey, same, toLoomItems } from './keys.js';
 import { hashFromName, mediaNames } from './media.js';
 
 const STRAND = 'com.cultureblocs.strand';
 const LOOM_DEDUPE = 'loom:';
-
-const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 /* What Send needs to know about the String's copy of a record. */
 export const stringFields = (rec) => ({ stringHlc: rec.hlc ?? null,

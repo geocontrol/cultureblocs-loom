@@ -165,6 +165,19 @@ test('deleting a bead takes it out of every strand that uses it, keeping each st
   assert.deepEqual((await store.getRecord(other.key)).body.items, [{ uri: itemUri(a.key) }]);
 });
 
+test('a bead delete that one using strand refuses changes no strand at all', async () => {
+  const { store, loom: l } = await loom();
+  const b = await bead(l, { note: 'b' });
+  const valid = await strand(l, [b.key]);                               // checked first: it would be rewritten
+  const imported = await strand(l, [b.key]);
+  const badBody = { ...imported.body, title: 'x'.repeat(301) };        // imported bodies are not validated
+  await store.putRecord({ ...imported, body: badBody });
+  await assert.rejects(l.remove(b.key), InvalidRecord);
+  assert.deepEqual((await store.getRecord(valid.key)).body.items, [{ uri: itemUri(b.key) }], 'nothing half-applied');
+  assert.deepEqual(await store.getRecord(valid.key), valid);
+  assert.ok(await store.getRecord(b.key));
+});
+
 test('published strands and annotations cannot be deleted', async () => {
   const { store, loom: l } = await loom();
   const s = await strand(l, []);

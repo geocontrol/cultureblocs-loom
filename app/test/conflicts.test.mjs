@@ -7,7 +7,7 @@ import { runImport } from '../lib/importer.js';
 import { itemUri } from '../lib/keys.js';
 import { createMemStore } from '../lib/memstore.js';
 import { runSend } from '../lib/sender.js';
-import { fakeString } from './fake-string.mjs';
+import { fakeString, photo } from './fake-string.mjs';
 import { makeBead, makeStrand, registry, steppingNow } from './helpers.mjs';
 
 const T = '2026-09-13T10:00:00Z';
@@ -143,6 +143,27 @@ test('an import conflict on a strand: their body comes back in Loom’s form; ta
   await takeTheirs(store, strand.key, { registry: reg });
   assert.deepEqual(await pending(store), []);
   assert.deepEqual((await store.getRecord(strand.key)).body.items, [{ uri: itemUri(a.key) }, { uri: itemUri(b.key) }]);
+});
+
+test('take theirs marks the String version’s photos this browser lacks as missing, and the next import fetches them', async () => {
+  const store = createMemStore();
+  const reg = await registry();
+  const loom = await openLoom({ store, registry: reg, now: steppingNow(), newDeviceId: () => 'desk-1' });
+  const s = fakeString({ records: [onString('u1')] });
+  await runImport({ store, registry: reg, client: s.client });
+  const name = `${'e'.repeat(64)}.jpg`;
+  s.media[name] = photo('e');
+  s.editOnString('u1', { note: 'with a photo now', media: [{ uri: `/media/${name}` }] });
+  const local = await store.getRecord(`${BEAD}/u1`);
+  await loom.save(local.key, { ...local.body, note: 'edited in Loom' });
+  await runSend({ store, client: s.client });                       // 412: conflict, theirs has the photo
+  const next = await takeTheirs(store, local.key);
+  assert.deepEqual(next.missing, [name]);
+  assert.deepEqual((await store.getRecord(local.key)).missing, [name]);
+  const { counts } = await runImport({ store, registry: reg, client: s.client });
+  assert.equal(counts.photos, 1);
+  assert.ok(await store.getBlob(name.slice(0, 64)));
+  assert.equal('missing' in (await store.getRecord(local.key)), false);
 });
 
 test('only a record in conflict can be resolved', async () => {

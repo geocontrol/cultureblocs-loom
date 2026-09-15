@@ -7,7 +7,10 @@
  *
  * While a strand is open, `ctx.desk.tick` lets the String column add and
  * remove beads; adding a proposal keeps it. A record in `conflict` shows both
- * versions and the two choices; one waiting to be deleted offers undo. */
+ * versions and the two choices; one waiting to be deleted offers undo, and
+ * one deleted here that is also in conflict shows its form read-only. A key
+ * with no record and no draft opens a new form only when the route says it
+ * is new (`isNew`); otherwise the record has gone. */
 import { reanchor, selectionToIndex } from '../lib/anchors.js';
 import { changedFields, keepMine, takeTheirs, theirBody } from '../lib/conflicts.js';
 import { BEAD, Conflict, EDITABLE, STRAND } from '../lib/envelope.js';
@@ -30,7 +33,7 @@ export function startingBody(type, { day = '', now = Date.now() } = {}) {
   return { kind: 'bloc', createdAt: (day && fromLocalInput(`${day}T12:00`)) || new Date(now).toISOString() };
 }
 
-export async function mountEditor(root, ctx, { key, day = '' }) {
+export async function mountEditor(root, ctx, { key, day = '', isNew = false }) {
   const { type } = splitKey(key);
   const inert = { render() {}, async flush() {}, unmount() {} };
   let record = await ctx.store.getRecord(key);
@@ -38,6 +41,9 @@ export async function mountEditor(root, ctx, { key, day = '' }) {
   if (record && !EDITABLE.includes(record.type)) { root.innerHTML = String(readOnlyView(record)); return inert; }
 
   const draft = await ctx.loom.getDraft(key);
+  // Only the shell's #/new/* redirect opens an empty form under a fresh key; a
+  // link to a record that has since gone (a Send result, another tab) must not.
+  if (!record && !draft && !isNew) { root.textContent = 'This record is no longer in this browser.'; return inert; }
   const state = {
     body: structuredClone(draft?.body ?? record?.body ?? startingBody(type, { day, now: ctx.now() })),
     restoredDraftAt: draft?.at ?? null, dirtyDraft: Boolean(draft), error: '', confirmDelete: null, tabConflict: null, armTheirs: false,
@@ -87,7 +93,8 @@ export async function mountEditor(root, ctx, { key, day = '' }) {
       conflict = conflictView({ fields: theirs ? changedFields(state.body, theirs) : [], theirs: Boolean(theirs), deleted: Boolean(record.deleted), armed: state.armTheirs });
     }
     const view = type === STRAND ? strandFormView : beadFormView;
-    const form = view({ ...state, record, problems: problems() });
+    // Deleted here and changed on the String: only the conflict's choices apply (save would be refused).
+    const form = view({ ...state, record, problems: problems(), locked: Boolean(record?.deleted) });
     const confirm = state.confirmDelete ? deleteView({ record, ...state.confirmDelete }) : '';
     root.innerHTML = String(html`${status}<p class="back"><a href="#/day/${record?.day || ''}">back</a></p>${conflict}${form}${confirm}`);
   }
@@ -154,6 +161,7 @@ export async function mountEditor(root, ctx, { key, day = '' }) {
   }
 
   function onInput(e) {
+    if (record?.deleted) return;                      // the form is shown read-only
     if (e.target.type === 'file' || e.target.closest?.('form.editor') === null) return;
     if (e.target.name === 'when') anchored = false;
     const before = text();
@@ -228,6 +236,7 @@ export async function mountEditor(root, ctx, { key, day = '' }) {
   const tick = {
     has: (beadKey) => list(state.body.items).some((it) => it?.uri === itemUri(beadKey)),
     async toggle(beadKey, on) {
+      if (gone) return;                               // discarded or deleted: a tick must not bring a draft back
       const items = list(state.body.items).filter((it) => it?.uri !== itemUri(beadKey));
       if (on) {
         const bead = await ctx.store.getRecord(beadKey);

@@ -424,7 +424,7 @@ test('an unreachable String fails each change and keeps it pending; a refused to
     async postRecords() { throw Object.assign(new Error('HTTP 401'), { status: 401 }); } };
   const results = await runSend({ store, client: denied });
   assert.equal(results.length, 1);
-  assert.match(results[0].reason, /check it in settings/);
+  assert.equal(results[0].reason, 'the String refused the token: check the token in settings');
   assert.ok([a.key, b.key].includes(results[0].key));
 });
 

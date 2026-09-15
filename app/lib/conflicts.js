@@ -7,15 +7,15 @@
  *                Send edits against, so the next Send carries Loom's body (or
  *                its delete); if the String deleted the record, Loom's copy is
  *                posted again as new — or, if Loom was deleting it too, it goes.
- *   takeTheirs   The String's version replaces Loom's, as an import would; if
- *                the String deleted the record, Loom's copy goes. An unsaved
- *                draft of an existing record is left in place, so nothing typed
- *                is lost. */
+ *   takeTheirs   The String's version replaces Loom's, as an import would
+ *                (photos it uses that this browser lacks are marked `missing`,
+ *                for the next import to fetch); if the String deleted the
+ *                record, Loom's copy goes. An unsaved draft of an existing
+ *                record is left in place, so nothing typed is lost. */
 import { contentHash } from '../vendor/strip.js';
 import { stringFields } from './importer.js';
-import { dayOf, toLoomItems } from './keys.js';
-
-const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+import { dayOf, same, toLoomItems } from './keys.js';
+import { hashFromName, mediaNames } from './media.js';
 
 const keyByStringId = async (store) =>
   new Map((await store.allRecords()).filter((r) => r.stringId).map((r) => [r.stringId, r.key]));
@@ -60,7 +60,7 @@ export async function keepMine(store, key) {
 }
 
 export async function takeTheirs(store, key, { registry = null, now = () => Date.now() } = {}) {
-  const { conflict, deleted: _d, problems: _p, invalid: _v, ...rest } = await conflicted(store, key);
+  const { conflict, deleted: _d, problems: _p, invalid: _v, missing: _m, ...rest } = await conflicted(store, key);
   const { theirs } = conflict;
   if (!theirs) {
     await store.deleteRecord(key);
@@ -73,6 +73,10 @@ export async function takeTheirs(store, key, { registry = null, now = () => Date
     importedHash: await contentHash(body), importedState: theirs.state || 'kept', ...stringFields(theirs) };
   const problems = registry ? registry.validateRecord(rest.type, theirs.body) : [];
   if (problems.length) next.invalid = problems;
+  // Photos the String's version uses that this browser lacks: import's retry fetches them.
+  const missing = [];
+  for (const name of mediaNames(theirs.body)) if (!(await store.getBlob(hashFromName(name)))) missing.push(name);
+  if (missing.length) next.missing = missing;
   await store.putRecord(next);
   return next;
 }

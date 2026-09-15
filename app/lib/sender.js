@@ -277,7 +277,7 @@ export async function runSend({ store, client, now = () => Date.now(), onProgres
       } else if (e.status === 422) {
         result = { key, op, ...(await markInvalid(key, e.detail)) };
       } else if (e.status === 401 || e.status === 403) {
-        results.push({ key, op, status: 'failed', reason: 'the String refused the token: check it in settings' });
+        results.push({ key, op, status: 'failed', reason: 'the String refused the token: check the token in settings' });
         onProgress(results.at(-1));
         break;
       } else {

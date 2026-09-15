@@ -2,10 +2,10 @@
  * conflict view, the top bar with Send's results, and settings. Pure. */
 import { summary } from '../lib/day.js';
 import { html } from './html.js';
+import { hhmm } from './view-form.js';
 import { dayLabel } from './view-string.js';
 
 const when = (iso) => (iso ? iso.replace('T', ' ').slice(0, 16) : 'never');
-const hhmm = (iso) => (typeof iso === 'string' ? iso.slice(11, 16) : '');
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 /* A record's words, cut to fit one line. */
 const short = (s, n = 80) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);

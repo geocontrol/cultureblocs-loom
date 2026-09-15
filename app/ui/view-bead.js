@@ -5,13 +5,13 @@ import { refsView } from './view-refs.js';
 
 const BEAD = 'com.cultureblocs.bead';
 
-/* state: { record, body, problems, urls, restoredDraftAt, dirtyDraft } — record is null for a new bead. */
+/* state: { record, body, problems, urls, restoredDraftAt, dirtyDraft, locked } — record is null for a new bead; locked renders it inert. */
 export function beadFormView(state) {
-  const { record = null, body, problems = [], urls = new Map(), restoredDraftAt = null, dirtyDraft = false } = state;
+  const { record = null, body, problems = [], urls = new Map(), restoredDraftAt = null, dirtyDraft = false, locked = false } = state;
   const kind = KINDS.includes(body.kind) ? body.kind : null;
   const geo = body.geo && typeof body.geo === 'object' ? body.geo : null;
   return html`
-    <form class="editor" data-type="${BEAD}">
+    <form class="editor" data-type="${BEAD}" ${locked ? 'inert' : ''}>
       <header>
         <h2>${record ? 'Bead' : 'New bead'}</h2>
         ${record?.state === 'proposal' ? html`<span class="chip">proposal — saving keeps it</span>` : ''}
@@ -34,6 +34,6 @@ export function beadFormView(state) {
       <fieldset><legend>refs — what this is about</legend>${refsView(body.refs, body.note || '')}</fieldset>
       ${provenanceView(record)}
       <div class="problems-slot">${problemsView(problems)}</div>
-      ${footerView({ record, problems, dirtyDraft })}
+      ${footerView({ record, problems, dirtyDraft, locked })}
     </form>`;
 }
