@@ -8,8 +8,7 @@ const SHELL = [
   './lib/anchors.js', './lib/backup.js', './lib/day.js', './lib/envelope.js', './lib/hlc.js', './lib/images.js',
   './lib/importer.js', './lib/keys.js', './lib/lexicons.js', './lib/media.js', './lib/memstore.js',
   './lib/routing.js', './lib/sender.js', './lib/store.js', './lib/string-client.js', './lib/tid.js',
-  './ui/compose.js', './ui/html.js', './ui/mint.js', './ui/string-panel.js', './ui/thread.js',
-  './ui/view-compose.js', './ui/view-mint.js', './ui/view-panel.js', './ui/view-refs.js', './ui/view-thread.js',
+  './ui/html.js', './ui/view-refs.js',
   './vendor/lexicon.js', './vendor/refs.js', './vendor/strip.js',
 ];
 

@@ -127,12 +127,3 @@ test('saving recomputes the flags an import set: invalid goes, and missing keeps
   const none = await l.save(bead.key, { ...bead.body });
   assert.equal('missing' in none, false);
 });
-
-test('newStrand ignores a wrapped bead whose refs are not a list', async () => {
-  const { store, loom: l } = await loom();
-  const bead = await l.mint({ note: 'x' });
-  await store.putRecord({ ...bead, body: { ...bead.body, refs: 'not a list' } });
-  const { newStrand } = await import('../ui/compose.js');
-  const strand = await newStrand({ store, loom: l, now: () => Date.parse('2026-09-15T10:00:00Z') }, { wrap: bead.key });
-  assert.equal('refs' in strand.body, false);
-});
