@@ -131,6 +131,40 @@ test('deleting a bead a sent strand uses: the strand is patched first, then the 
   assert.equal(s.records.length, 2);
 });
 
+test('a bead delete is held until the strand that dropped it is patched, then a later Send sends both', async () => {
+  const { store, loom, s } = await setup();
+  const a = await makeBead(loom, { note: 'a' }), b = await makeBead(loom, { note: 'b' });
+  const strand = await makeStrand(loom, strandBody([a.key, b.key]));
+  await runSend({ store, client: s.client });
+  const bId = (await store.getRecord(b.key)).stringId;
+  await loom.remove(b.key);
+  const flaky = { ...s.client, async patchRecord() { throw new Error('timeout'); } };
+  const results = await runSend({ store, client: flaky });
+  assert.deepEqual(results.map((r) => [r.op, r.key, r.status]), [['patch', strand.key, 'failed'], ['delete', b.key, 'held']]);
+  assert.match(results[1].reason, /strand/);
+  const onStrand = s.records.find((r) => r.type === STRAND);
+  assert.deepEqual(onStrand.body.items.map((it) => it.uri).sort(),
+    [`spine://records/${(await store.getRecord(a.key)).stringId}`, `spine://records/${bId}`].sort(),
+    'the String strand still lists the bead: the patch never reached it');
+  assert.deepEqual(await pending(store), [[b.key, 'delete'], [strand.key, 'edit']]);
+  const again = await runSend({ store, client: s.client });
+  assert.deepEqual(again.map((r) => [r.op, r.key, r.status]), [['patch', strand.key, 'sent'], ['delete', b.key, 'sent']]);
+  assert.deepEqual(await pending(store), []);
+});
+
+test('a strand patch answered 412 marks it conflicted and still holds the bead delete', async () => {
+  const { store, loom, s } = await setup();
+  const a = await makeBead(loom, { note: 'a' }), b = await makeBead(loom, { note: 'b' });
+  const strand = await makeStrand(loom, strandBody([a.key, b.key]));
+  await runSend({ store, client: s.client });
+  const strandId = (await store.getRecord(strand.key)).stringId;
+  await loom.remove(b.key);
+  s.editOnString(strandId, { title: 'Changed elsewhere' });
+  const results = await runSend({ store, client: s.client });
+  assert.deepEqual(results.map((r) => [r.op, r.key, r.status]), [['patch', strand.key, 'conflict'], ['delete', b.key, 'held']]);
+  assert.equal((await store.getRecord(strand.key)).conflict.reason, 'send');
+});
+
 test('a PATCH answered 412 marks a conflict with the String’s version and leaves the local edit', async () => {
   const { store, loom, s, importAll } = await setup([onString('u1')]);
   await importAll();
@@ -201,6 +235,23 @@ test('a record from Phase 1 with no String version fetches it first, and conflic
   assert.ok(s.calls.includes('getRecord u1'));
   assert.equal(s.records[0].body.note, `edited ${BEAD}/u1`);
   assert.equal(s.records[1].body.note, 'moved on');
+});
+
+test('a Phase 1 record whose String copy was kept/published elsewhere (state changed, body same) is a conflict', async () => {
+  const { store, loom, s, importAll } = await setup([onString('u1')]);
+  await importAll();
+  const { stringHlc: _h, stringKeys: _k, stringMedia: _m, ...phase1 } = await store.getRecord(`${BEAD}/u1`);
+  await store.putRecord(phase1);
+  await loom.save(phase1.key, { ...phase1.body, note: 'edited locally' });
+  await s.client.setState('u1', 'published');
+  const results = await runSend({ store, client: s.client });
+  assert.deepEqual(results.map((r) => [r.op, r.status]), [['patch', 'conflict']]);
+  assert.ok(s.calls.includes('getRecord u1'));
+  assert.equal(s.calls.includes('patch u1'), false, 'nothing was written to the String');
+  const after = await store.getRecord(phase1.key);
+  assert.equal(after.body.note, 'edited locally');
+  assert.deepEqual([after.conflict.reason, after.conflict.theirs.state], ['send', 'published']);
+  assert.equal(s.records[0].body.note, 'note u1');
 });
 
 test('content the String refuses stays pending with its problems; a photo missing locally fails that record only', async () => {

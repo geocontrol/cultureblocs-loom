@@ -8,6 +8,15 @@
  * Photos upload before the record that uses them, unless the String already
  * has them (`stringMedia`).
  *
+ * A bead's DELETE waits for every strand whose edit dropped that bead
+ * (envelope.js's `remove` rewrites those strands' bodies locally before Send
+ * ever runs) to be safely patched first: Loom keeps no copy of the String's
+ * body, so it cannot tell from a strand's current body which bead an
+ * unresolved edit concerned. The simplest safe rule stands in for that: every
+ * bead delete in a Send is held while any strand's edit, pending when that
+ * Send started, has not been sent — whether it is still to come, or it just
+ * failed, was refused, or conflicted.
+ *
  * Every request is safe to repeat. A POST carries dedupeKey "loom:<rkey>". A
  * PATCH or DELETE carries If-Match with the version Loom last saw
  * (`stringHlc`): a 412 means the String moved on, so the record is marked
@@ -15,7 +24,8 @@
  * exactly what was being sent, which is a success (a lost response). A DELETE
  * answered 404 is done. A record migrated from Phase 1 without `stringHlc`
  * fetches the String's copy first, and uses its version only if the body is
- * the one Loom last imported.
+ * the one Loom last imported and its state has not moved either — a state
+ * change alone (kept/published elsewhere) is also treated as stale.
  *
  * After each success the String's answer is recorded onto a fresh read of the
  * record, as an import would record it: an edit saved while the request was
@@ -26,6 +36,7 @@ import { stringFields } from './importer.js';
 import { keyFromItemUri, spineUri, toLoomItems } from './keys.js';
 import { hashFromName, mediaNames } from './media.js';
 
+const BEAD = 'com.cultureblocs.bead';
 const STRAND = 'com.cultureblocs.strand';
 const list = (v) => (Array.isArray(v) ? v : []);
 const OP = { new: 'post', edit: 'patch', state: 'state', delete: 'delete' };
@@ -64,8 +75,17 @@ const problemsOf = (detail) => (Array.isArray(detail) ? detail.map((p) => (typeo
 
 export async function runSend({ store, client, now = () => Date.now(), onProgress = () => {} }) {
   const iso = () => new Date(now()).toISOString();
-  const { ready, held } = await planSend(await store.allRecords());
+  const records = await store.allRecords();
+  const { ready, held } = await planSend(records);
   const results = held.map((h) => ({ key: h.key, status: 'held', reason: h.reason }));
+
+  // Strands (on the String, not deleted) whose edit was pending when this Send
+  // started: a bead delete is held while any of these is still waiting, since
+  // it may be the strand that dropped that bead (see the header comment).
+  const pendingAtStart = await pendingChanges(records);
+  const strandsWaiting = new Set(records
+    .filter((r) => r.type === STRAND && !r.deleted && r.stringId && pendingAtStart.get(r.key) === 'edit')
+    .map((r) => r.key));
 
   const keyByStringId = async () => new Map((await store.allRecords()).filter((r) => r.stringId).map((r) => [r.stringId, r.key]));
 
@@ -118,11 +138,15 @@ export async function runSend({ store, client, now = () => Date.now(), onProgres
   }
 
   /* The version to send If-Match against: Loom's, or for a record without one,
-   * the String's — if its body is still the one Loom last imported. */
+   * the String's — if its body is still the one Loom last imported and its
+   * state has not moved either (a state change alone, e.g. kept or published
+   * elsewhere, is a version Loom never saw). */
   async function base(env) {
     if (env.stringHlc && Array.isArray(env.stringKeys)) return { hlc: env.stringHlc, keys: env.stringKeys };
     const current = await client.getRecord(env.stringId);
-    if ((await contentHash(current.body)) !== env.stringHash) return { stale: current };
+    if ((await contentHash(current.body)) !== env.stringHash || (current.state || 'kept') !== env.importedState) {
+      return { stale: current };
+    }
     return { hlc: current.hlc, keys: Object.keys(current.body) };
   }
 
@@ -182,6 +206,13 @@ export async function runSend({ store, client, now = () => Date.now(), onProgres
   for (const { op, key } of ready) {
     const env = await store.getRecord(key);                   // fresh: an earlier op may have set a member's stringId
     if (!env) continue;
+    if (op === 'delete' && env.type === BEAD && strandsWaiting.size) {
+      const result = { key, op, status: 'held',
+        reason: 'a strand that dropped it has not been patched on the String yet' };
+      results.push(result);
+      onProgress(result);
+      continue;
+    }
     let result;
     try {
       result = { key, op, ...(await ops[op](env)) };
@@ -198,6 +229,7 @@ export async function runSend({ store, client, now = () => Date.now(), onProgres
         result = { key, op, status: 'failed', reason: e.message };
       }
     }
+    if (env.type === STRAND && op === 'patch' && result.status === 'sent') strandsWaiting.delete(key);
     results.push(result);
     onProgress(result);
   }
