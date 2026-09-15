@@ -12,7 +12,10 @@ that needs no server of its own, and it turns
 you run one — into a **personal sync server** in the sense
 [Groundmist](https://groundmist.xyz/) describes.
 
-**Status: design. No code yet.** The full argument, the review of the
+**Status: Phase 1 — local only.** Thread, Mint and Compose run in the
+browser with no server of their own; existing records arrive by a
+deliberate import from the String, and Loom-made ones reach it by a
+deliberate send, until Phase 2 sync. The full argument, the review of the
 String that motivated it, and the build order are in
 **[LOOM.md](LOOM.md)** — start there.
 
@@ -31,6 +34,21 @@ Two ways in, one mint fact: a **quick bead** (offline, no network on
 the critical path) or a **full diary entry**. A bead minted at 21:04
 can be *grown* into an entry at breakfast — the bead does not change,
 the strand wraps it.
+
+## Running it (Phase 1)
+
+    docker compose up -d          # http://localhost:8108
+
+Open **string** in the bar, point it at your String (`http://localhost:8100`),
+**check**, then **import**. Mint and write; **send** puts Loom-made records on
+the String; **download backup** keeps a copy of everything in this browser.
+Phase 1 is desk-first on `localhost`: a phone needs Loom served over HTTPS.
+
+    node --test app/test/*.test.mjs        # the app's tests, no dependencies
+    scripts/vendor-sdk.sh                  # refresh app/vendor from ../cultureblocs-string
+
+`app/test/store.html` (served at `/test/store.html`) runs the storage
+contract against the browser's real IndexedDB.
 
 ## Three decisions this repo is built on
 

@@ -1,6 +1,6 @@
 # Loom Phase 1 — local-only app: design
 
-Status: approved in brainstorming on 2026-09-14; awaiting spec review.
+Status: approved 2026-09-14. Corrected 2026-09-15 from the implementation prototype (see §11).
 Parent design: [`LOOM.md`](../../../LOOM.md) — §3 (shape), §4 (data model), §9 (referents), §10 Phase 1.
 Code lands in **this repository** under `app/`.
 
@@ -94,8 +94,9 @@ hlc         "<13-digit ms>-<5-digit counter>-<deviceId>"   (the String's format)
 deviceId    this browser's id (generated once, kept in meta)
 day         derived, for the index
 stringId    the String's record id, once imported or sent
-importedHash  sha256 of canonical body at import time (imported records only)
-importedState the String's state at import time (imported records only)
+stringHash    sha256 of the String's body as last imported or sent
+importedHash  sha256 of Loom's body as stored at that moment (differs for strands: items rewritten)
+importedState the String's state at that moment
 sentAt      when a Loom-made record was accepted by the String
 missing     [ media file names that could not be fetched ]   (optional)
 invalid     [ validator problems ]   (imported records that fail Loom's validator)
@@ -145,16 +146,19 @@ in *desk posture* (Thread centre, Compose beside it). Posture is a setting.
 
 **Mint.** Mask strip (default masks as Pocket's), optional one-line note,
 kind picker (default `bloc`), press. Writes a bead with `origin: "mint"`,
-`provenance: { app: "loom", mintedAt: <press> }`, tag = mask name, to
-IndexedDB before any animation; then Pocket's bloom. No network.
+`provenance: { app: "loom", device, mintedAt: <press> }`, tag = mask name, to
+IndexedDB before any animation; then a bloom (a CSS pulse; Pocket's dot
+matrix is not ported in Phase 1). No network.
 
 **Compose — strand.** Title, day, place name, links; narrative (plain
 textarea); items (the day's beads, tick to include, drag or arrows to
-order; proposals shown with keep-and-include); photos (pick or drop,
-resized, content-addressed); refs (below). Live problems list; **Save**
-disabled while any exist.
+order; proposals shown with keep-and-include); refs (below). Live
+problems list; **Save** (stays a draft) and **save as told** (kept, and so
+sendable) are disabled while any exist. Photos belong to beads: the
+`strand` lexicon has no media field.
 
-**Compose — bead.** Note, kind, place, photos, refs. Same editor, fewer fields.
+**Compose — bead.** Note, kind, place, links, photos (pick, resized to a
+2000px edge, content-addressed, with alt text), refs.
 
 **Refs editor.** One row per ref: type (`work`, `person`, `event`, `venue`,
 `concept`, or free text), role (`subject`/`mention`), label, creator,
@@ -182,7 +186,7 @@ time of the last backup.
    - *add* — no local record with that `stringId`;
    - *update* — unchanged locally (body still hashes to `importedHash` and
      state equals `importedState`) and the String's body or state differs;
-   - *unchanged* — the String's body hashes to `importedHash` and its state
+   - *unchanged* — the String's body hashes to `stringHash` and its state
      equals `importedState`;
    - *conflict* — changed on both sides (body or state); left alone and listed.
      Keeping or releasing an imported proposal in Loom is a local change.
@@ -201,9 +205,11 @@ time of the last backup.
    rewrite strand items `loom://…` → `spine://records/<stringId>`;
    `POST /records` with `dedupeKey: "loom:<rkey>"`, `sourceApp: "loom"`,
    `createdAt` and `body`. (Phase 1 creates no proposals, so no `state` is
-   sent; strands arrive as the String's default `draft`.)
-3. On `created` or `duplicate`, set `stringId` and `sentAt`. On `invalid`,
-   keep the record unsent and show the String's problems.
+   sent; the String stores its default, `kept`. Draft strands are not sent.)
+3. On `created` or `duplicate`, set `stringId` and `sentAt`, and the same
+   `stringHash` / `importedHash` / `importedState` an import would, so the
+   next import sees the record as unchanged. On `invalid`, keep the record
+   unsent and show the String's problems.
 
 Edits to records that already have a `stringId` — including keeping or
 releasing an imported proposal — are not sent in Phase 1; the panel counts
@@ -260,3 +266,19 @@ them as "local changes, sync in Phase 2".
 - §3: port `:8108`, not `:8105`.
 - §10 Phase 1: add the one-way import and manual send, and that Phase 1 is
   desk-first on localhost.
+
+## 11 · Corrections from the prototype (2026-09-15)
+
+Found while building and running the Phase 1 prototype against a copy of
+the real String:
+
+- **Strands carry no photos.** The `strand` lexicon has no media field;
+  photos are edited on beads (§6).
+- **Two hashes, not one.** Import rewrites strand items, so detecting a
+  Loom edit and detecting a String change need different hashes
+  (`importedHash` for the local body, `stringHash` for the String's) (§5, §7).
+- **Send records its hashes.** Without them every record sent from Loom
+  came back from the next import as "changed on both sides" (§7).
+- **Sent strands are `kept` on the String**, its default; drafts stay home (§7).
+- **The first service-worker install must not reload the page** — only the
+  replacement of an existing worker is an update (§8).
