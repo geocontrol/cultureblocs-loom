@@ -140,3 +140,14 @@ test('a shape-wrong imported record still renders: tags, media, items, refs and 
   assert.match(String(composeView({ record: strandOdd, body: strandOdd.body })), /beads in this entry/);
   assert.match(String(composeView({ record: odd, body: odd.body })), /photos/);
 });
+
+test('refs render when an imported ref carries externalIds that are not a list', () => {
+  assert.doesNotThrow(() => String(refsView([{ type: 'work', role: 'subject', descriptor: { label: 'X' }, externalIds: 'wikidata:Q1' }], 'X')));
+  assert.doesNotThrow(() => String(refsView([{ type: 'work', role: 'subject', descriptor: { label: 'X' }, externalIds: [null, 7] }], 'X')));
+});
+
+test('restore cannot be confirmed while an import or send is running', () => {
+  const s = { pendingRestore: { fileName: 'b.json', records: 1, unsent: 0, incoming: 1 }, sendResults: [] };
+  assert.doesNotMatch(String(panelView({ ...s, busy: false })), /data-action="restore-confirm" disabled/);
+  assert.match(String(panelView({ ...s, busy: true })), /data-action="restore-confirm" disabled/);
+});

@@ -73,7 +73,7 @@ export async function mountPanel(root, ctx) {
         catch (err) { s.sendResults = [{ key: '', status: 'failed', reason: err.message }]; }
         ctx.broadcast();
       });
-    } else if (action === 'restore-confirm' && s.pendingRestore) {
+    } else if (action === 'restore-confirm' && s.pendingRestore && !s.busy) {   // an import or send still writing would land in the restored store
       const { doc } = s.pendingRestore;
       s.pendingRestore = null;
       try {

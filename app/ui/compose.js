@@ -64,10 +64,10 @@ export async function mountCompose(root, ctx, { key }) {
   }
 
   function refreshInPlace() {
-    const list = problems();
+    const found = problems();
     const slot = root.querySelector('.problems-slot');
-    if (slot) slot.innerHTML = String(problemsView(list));
-    root.querySelectorAll('button[data-action="save"], button[data-action="finish"]').forEach((b) => { b.disabled = list.length > 0; });
+    if (slot) slot.innerHTML = String(problemsView(found));
+    root.querySelectorAll('button[data-action="save"], button[data-action="finish"]').forEach((b) => { b.disabled = found.length > 0; });
     list(state.body.refs).forEach((ref, i) => {
       const hint = root.querySelector(`[data-hint="${i}"]`);
       if (hint) hint.textContent = publishHint(ref);

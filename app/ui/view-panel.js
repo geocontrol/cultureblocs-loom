@@ -34,7 +34,7 @@ export function panelView(s) {
         <p>Restoring ${s.pendingRestore.fileName || 'this file'} replaces ${s.pendingRestore.records} record${s.pendingRestore.records === 1 ? '' : 's'} in this browser (${s.pendingRestore.unsent} not yet sent to the String) with the file's ${s.pendingRestore.incoming}.
           Anything not in the file is gone for good.</p>
         <button type="button" data-action="backup">download a backup first</button>
-        <button type="button" data-action="restore-confirm">replace with the file</button>
+        <button type="button" data-action="restore-confirm" ${s.busy ? 'disabled' : ''}>replace with the file</button>
         <button type="button" data-action="restore-cancel">cancel</button>
       </div>` : ''}
 

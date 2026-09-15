@@ -14,13 +14,13 @@ export function publishHint(ref) {
   }
   const notes = [];
   if (ref.descriptor?.creator && !out.descriptor.creator) notes.push('creator stays local until the work is identified');
-  const dropped = (ref.externalIds || []).length - (out.externalIds || []).length;
+  const dropped = (Array.isArray(ref.externalIds) ? ref.externalIds.length : 0) - (out.externalIds || []).length;
   if (dropped > 0) notes.push(`${dropped} id${dropped === 1 ? '' : 's'} stay${dropped === 1 ? 's' : ''} local`);
   if (ref.did && !out.did) notes.push('the DID is not well-formed');
   return notes.length ? `publishes, but ${notes.join('; ')}` : 'publishes as shown';
 }
 
-const idsText = (ids) => (ids || []).map((e) => `${e.scheme}:${e.id}`).join('\n');
+const idsText = (ids) => (Array.isArray(ids) ? ids : []).filter((e) => e && typeof e === 'object').map((e) => `${e.scheme}:${e.id}`).join('\n');
 
 export function refsView(refs, text) {
   return html`

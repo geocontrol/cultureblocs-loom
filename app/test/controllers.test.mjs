@@ -273,3 +273,11 @@ test('local changes to records on the String are counted by hash and state, sent
   ];
   assert.deepEqual(await Promise.all(records.map((r) => localChangeCount([r]))), [1, 0, 1, 0, 0]);
 });
+
+test('typing in compose updates in place without throwing', async () => {
+  const ctx = await context();
+  const strand = await newStrand(ctx, { day: '2026-08-15' });
+  const root = fakeRoot();
+  await mountCompose(root, ctx, { key: strand.key });
+  assert.doesNotThrow(() => root.fire('input', { type: 'text', name: 'title', value: 'Tate' }));
+});
