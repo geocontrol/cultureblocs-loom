@@ -330,7 +330,8 @@ Where it differs from the sections above, this section is the design.
   top bar, Send page, settings). The controllers are `ui/string.js`,
   `ui/editor.js` (one controller for both forms, new and existing),
   `ui/pages.js` (top bar, Send page, day page, `sendAll`) and
-  `ui/settings.js`. `lib/routing.js` keeps only the route serialiser.
+  `ui/settings.js`. `lib/routing.js` keeps the route serialiser and the
+  Phase 1 redirects.
 - **Drafts of new records** live under `draft:<key>` like any draft, with
   the record's `type` stored in the draft; `loom.newDrafts()` lists the
   ones with no record yet. `#/new/bead` and `#/new/strand` reserve a key
@@ -368,3 +369,42 @@ Where it differs from the sections above, this section is the design.
   second press. "Keep mine" does not ask: nothing is lost by it.
 - **A failed write** shows the browser's own message in the form's status
   line ("draft not saved: …" for a draft), and the form keeps what was typed.
+- **A deleted record changed on the String** becomes a conflict on import
+  (`reason: "import"`): "delete it anyway" or "take the String's". Only a
+  deleted record the String has not changed (body hash and state as last
+  imported) is unchanged, and only then does import refresh its
+  `stringHlc` — otherwise Send's DELETE would carry the new version and
+  wipe the change. Migrated Phase 1 releases are treated the same.
+- **Phase 1 adoption.** A record without `stringHlc` uses the String's
+  version only if the String's body hash equals `stringHash` and its state
+  equals `importedState`; either differing is a conflict.
+- **State changes are version-checked.** `POST /records/{id}/state` carries
+  no If-Match, so Send first fetches the record and requires its hlc to
+  equal `stringHlc` (or, for a Phase 1 record, the adoption check above);
+  otherwise conflict with `theirs` the current record. After the state
+  change the answer is recorded only if its body hash equals `stringHash`;
+  otherwise conflict. A PATCH answered 412 counts as a lost response only if
+  the String's body hash equals the body sent and its state equals the one
+  the PATCH produces (`kept` for a proposal, else the imported state).
+- **The bead-DELETE hold.** A bead's DELETE is held while a local strand
+  (not deleted) still lists the bead ("still in <strand>"), or while a
+  strand on the String that is in conflict, or whose edit or delete has not
+  succeeded yet, still lists it there (Send fetches that strand's String
+  copy; a 404 is no reason to hold). A fetch that fails otherwise holds too,
+  and says the strand could not be checked. The hold persists across Sends
+  until the strand is resolved.
+- **Rows without an hlc.** Phase 1 records with no `stringHlc` are protected
+  by fetch-and-compare before every write; the only unprotected window is
+  the race between that GET and the write itself. The same window applies
+  to a state change.
+- **Old Phase 1 addresses redirect** (`location.replace`): `#/thread` and
+  `#/thread/<period>` → `#/day/<day>` for a day, else `#/`; `#/mint` →
+  `#/new/bead`; `#/compose/new` → `#/new/strand`; `#/compose/<key>` →
+  `#/edit/<key>`; `#/string` → `#/settings`.
+- **A gone record.** `#/new/*` redirects to `#/edit/<key>?new=1`; opening
+  `#/edit/<key>` with no record, no draft and no `new=1` (a Send result for
+  a record just deleted) says "This record is no longer in this browser."
+  A record deleted here and in conflict shows its form read-only, without
+  Save or Delete.
+- **Take the String's** marks the photos the String's version uses that
+  this browser lacks as `missing`, so the next import fetches them.
