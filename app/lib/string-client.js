@@ -39,6 +39,9 @@ export function stringClient(baseUrl, token, fetchImpl = globalThis.fetch.bind(g
     async listRecords(type) {
       return (await (await call(`/records?type=${encodeURIComponent(type)}&limit=2000`)).json()).records;
     },
+    async getRecord(id) {
+      return (await call(`/records/${encodeURIComponent(id)}`)).json();
+    },
     async getMedia(name) {
       return (await call(`/media/${encodeURIComponent(name)}`)).blob();
     },

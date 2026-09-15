@@ -6,10 +6,16 @@
  * its loom:// items are rewritten to spine://records/<id>. Photos upload
  * before the record that uses them. Each record posts under
  * dedupeKey "loom:<rkey>", so a retry after a timeout cannot duplicate it.
- * Edits to records already on the String are not sent until Phase 2. */
+ * Edits to records already on the String are not sent until Phase 2.
+ *
+ * What is recorded after a post is written onto a fresh read of the record:
+ * an edit saved while the post was in flight keeps its body and reads as a
+ * local change. On "duplicate" the String already held a body (perhaps an
+ * older one, from a send whose response was lost), so the hashes come from
+ * what the String holds, fetched, not from what was just posted. */
 import { contentHash } from '../vendor/strip.js';
 import { isUnsent } from './day.js';
-import { keyFromItemUri, spineUri } from './keys.js';
+import { keyFromItemUri, spineUri, toLoomItems } from './keys.js';
 import { hashFromName, mediaNames } from './media.js';
 
 const STRAND = 'com.cultureblocs.strand';
@@ -64,8 +70,15 @@ export async function runSend({ store, client, now = () => Date.now(), onProgres
       if (res.status === 'created' || res.status === 'duplicate') {
         // Record what the String now holds, as an import would, so the next
         // import sees this record as unchanged rather than changed on both sides.
-        await store.putRecord({ ...env, stringId: res.id, sentAt: new Date(now()).toISOString(),
-          stringHash: await contentHash(body), importedHash: await contentHash(env.body), importedState: env.state });
+        let linked = { stringHash: await contentHash(body), importedHash: await contentHash(env.body), importedState: env.state };
+        if (res.status === 'duplicate') {
+          const held = await client.getRecord(res.id);
+          const keyByStringId = new Map((await store.allRecords()).filter((r) => r.stringId).map((r) => [r.stringId, r.key]));
+          linked = { stringHash: await contentHash(held.body),
+            importedHash: await contentHash(toLoomItems(held.body, keyByStringId)), importedState: held.state || 'kept' };
+        }
+        const fresh = await store.getRecord(env.key);   // an edit may have landed during the post
+        if (fresh) await store.putRecord({ ...fresh, stringId: res.id, sentAt: new Date(now()).toISOString(), ...linked });
         Object.assign(result, { status: 'sent', stringId: res.id });
       } else {
         Object.assign(result, { status: 'invalid', problems: res.problems || [] });

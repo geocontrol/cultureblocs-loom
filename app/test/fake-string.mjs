@@ -9,6 +9,11 @@ export function fakeString({ records = [], media = {}, failMedia = new Set(), re
     base: 'http://string.test',
     async health() { return ['com.cultureblocs.bead', 'com.cultureblocs.strand', 'com.cultureblocs.annotation'] ; },
     async listRecords(type) { return structuredClone(records.filter((r) => r.type === type)); },
+    async getRecord(id) {
+      const rec = records.find((r) => r.id === id);
+      if (!rec) throw new Error(`HTTP 404 for record ${id}`);
+      return structuredClone(rec);
+    },
     async getMedia(name) {
       if (failMedia.has(name) || !media[name]) throw new Error(`HTTP 404 for ${name}`);
       return media[name];

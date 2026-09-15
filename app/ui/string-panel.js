@@ -54,6 +54,7 @@ export async function mountPanel(root, ctx) {
         try {
           const { counts, conflicts } = await runImport({ store: ctx.store, registry: ctx.registry, client: client(), now: ctx.now });
           s.importResult = `added ${counts.add}, updated ${counts.update}, unchanged ${counts.unchanged}, photos ${counts.photos}`
+            + (counts.link ? `, ${counts.link} already sent from here re-linked` : '')
             + (counts.invalid ? `, ${counts.invalid} flagged invalid` : '')
             + (counts.missing ? `, ${counts.missing} photos missing` : '')
             + (conflicts.length ? ` — changed on both sides, left alone: ${conflicts.join(', ')}` : '');

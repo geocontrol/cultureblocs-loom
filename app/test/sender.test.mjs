@@ -5,6 +5,9 @@ import { itemUri } from '../lib/keys.js';
 import { createMemStore } from '../lib/memstore.js';
 import { putPhoto } from '../lib/media.js';
 import { planSend, runSend } from '../lib/sender.js';
+import { runImport } from '../lib/importer.js';
+import { exportBackup, restoreBackup } from '../lib/backup.js';
+import { contentHash } from '../vendor/strip.js';
 import { fakeString, photo } from './fake-string.mjs';
 import { registry, steppingNow } from './helpers.mjs';
 
@@ -79,6 +82,74 @@ test('a record the String rejects stays unsent with its problems; a photo missin
   assert.equal(results[nophoto.key].status, 'failed');
   assert.match(results[nophoto.key].reason, /not in this browser/);
   assert.equal((await store.getRecord(rejected.key)).stringId, undefined);
+});
+
+const gate = () => {
+  let open, reached;
+  const opened = new Promise((r) => { open = r; });
+  const arrived = new Promise((r) => { reached = r; });
+  return { open, arrived, async pass() { reached(); await opened; } };
+};
+
+test('an edit saved while its record is being posted survives, and reads as a local change', async () => {
+  const { loom, store } = await setup();
+  const bead = await loom.mint({ note: 'as posted' });
+  const s = fakeString();
+  const g = gate();
+  const client = { ...s.client, async postRecords(batch) { await g.pass(); return s.client.postRecords(batch); } };
+  const sending = runSend({ store, client, now: () => 5 });
+  await g.arrived;
+  await loom.save(bead.key, { ...bead.body, note: 'edited during send' });
+  g.open();
+  const [result] = await sending;
+  assert.equal(result.status, 'sent');
+  const after = await store.getRecord(bead.key);
+  assert.equal(after.body.note, 'edited during send');
+  assert.equal(after.stringId, result.stringId);
+  assert.notEqual(await contentHash(after.body), after.importedHash, 'the newer edit is a local change');
+  const { counts } = await runImport({ store, registry: await registry(), client: s.client });
+  assert.deepEqual([counts.update, counts.unchanged], [0, 1]);
+  assert.equal((await store.getRecord(bead.key)).body.note, 'edited during send');
+});
+
+test('a lost response, a local edit, then a resend answered "duplicate": the edit stays a local change', async () => {
+  const { loom, store } = await setup();
+  const bead = await loom.mint({ note: 'first' });
+  const s = fakeString();
+  await runSend({ store, client: s.client });
+  const { stringId, sentAt: _s, stringHash: _h, importedHash: _i, importedState: _t, ...lost } = await store.getRecord(bead.key);
+  await store.putRecord(lost);                                          // the response never arrived
+  await loom.save(bead.key, { ...bead.body, note: 'edited after the lost response' });
+  const [again] = await runSend({ store, client: s.client });
+  assert.deepEqual([again.status, again.stringId, s.records.length], ['sent', stringId, 1]);
+  const reg = await registry();
+  const first = await runImport({ store, registry: reg, client: s.client });
+  assert.equal(first.counts.update, 0);
+  assert.equal((await store.getRecord(bead.key)).body.note, 'edited after the lost response');
+  s.records[0].body.note = 'changed on the String';
+  const second = await runImport({ store, registry: reg, client: s.client });
+  assert.deepEqual(second.conflicts, [bead.key]);
+  assert.equal((await store.getRecord(bead.key)).body.note, 'edited after the lost response');
+});
+
+test('restoring a backup taken before a send, then importing, links the sent records instead of copying them', async () => {
+  const { loom, store } = await setup();
+  const bead = await loom.mint({ note: 'a' });
+  await loom.create(STRAND, strandBody([bead.key]), { origin: 'compose', state: 'kept' });
+  const doc = JSON.parse(JSON.stringify(await exportBackup(store)));
+  const s = fakeString();
+  await runSend({ store, client: s.client });
+  await restoreBackup(store, doc);
+  const reg = await registry();
+  const { counts, conflicts } = await runImport({ store, registry: reg, client: s.client });
+  assert.deepEqual([counts.add, counts.link, conflicts.length], [0, 2, 0]);
+  const all = await store.allRecords();
+  assert.equal(all.length, 2);
+  assert.ok(all.every((r) => r.stringId && r.sentAt));
+  assert.deepEqual(await runSend({ store, client: s.client }), []);
+  assert.equal(s.posted.length, 2, 'nothing was posted again');
+  const again = await runImport({ store, registry: reg, client: s.client });
+  assert.deepEqual([again.counts.unchanged, again.counts.conflict], [2, 0]);
 });
 
 test('a sent record comes back from the next import as unchanged, not as a conflict', async () => {

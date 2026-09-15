@@ -5,7 +5,8 @@ import { createMemStore } from '../lib/memstore.js';
 import { mediaName, sha256Hex } from '../lib/media.js';
 import { contentHash } from '../vendor/strip.js';
 import { fakeString, photo } from './fake-string.mjs';
-import { registry } from './helpers.mjs';
+import { openLoom } from '../lib/envelope.js';
+import { registry, steppingNow } from './helpers.mjs';
 
 const B = 'com.cultureblocs.bead', S = 'com.cultureblocs.strand';
 const T = '2026-09-13T10:00:00Z';
@@ -96,6 +97,31 @@ test('a photo that cannot be fetched is recorded as missing and retried on the n
   const second = await runImport({ store, registry: reg, client: s.client });
   assert.equal(second.counts.photos, 1);
   assert.equal('missing' in (await store.getRecord(`${B}/u1`)), false);
+});
+
+test('an edit saved while an import fetches a photo is a conflict, and the edit survives', async () => {
+  const pic = photo('arrives later');
+  const name = await nameOf(pic);
+  const s = fakeString({ records: [bead('u1', 'one')], media: { [name]: pic } });
+  const store = createMemStore();
+  const reg = await registry();
+  const loom = await openLoom({ store, registry: reg, now: steppingNow(), newDeviceId: () => 'desk-1' });
+  await runImport({ store, registry: reg, client: s.client });
+  s.records[0].body = { ...s.records[0].body, note: 'one, with a photo', media: [{ uri: `/media/${name}` }] };
+
+  let open, reached;
+  const opened = new Promise((r) => { open = r; });
+  const arrived = new Promise((r) => { reached = r; });
+  const client = { ...s.client, async getMedia(n) { reached(); await opened; return s.client.getMedia(n); } };
+  const importing = runImport({ store, registry: reg, client });
+  await arrived;
+  const local = await store.getRecord(`${B}/u1`);
+  await loom.save(local.key, { ...local.body, note: 'edited in Loom meanwhile' });
+  open();
+  const { counts, conflicts } = await importing;
+  assert.deepEqual([counts.update, counts.conflict], [0, 1]);
+  assert.deepEqual(conflicts, [`${B}/u1`]);
+  assert.equal((await store.getRecord(`${B}/u1`)).body.note, 'edited in Loom meanwhile');
 });
 
 test('planImport is decided by hashes and states alone', async () => {
