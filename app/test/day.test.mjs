@@ -57,3 +57,9 @@ test('a bead claimed by two strands on one day appears inside both, and not loos
   assert.deepEqual(dayString([a, s1, s2]).map((e) => [e.kind, e.record.key, e.members.map((m) => m.key)]),
     [['strand', 's/1', ['b/a']], ['strand', 's/2', ['b/a']]]);
 });
+
+test('a strand whose items are not a list has no members, and does not throw', () => {
+  const a = rec('b/a', B, '2026-09-14T08:00:00Z');
+  const s = rec('s/1', S, '2026-09-14T20:00:00Z', { body: { items: 'loom://b/a' } });
+  assert.deepEqual(dayString([a, s]).map((e) => [e.kind, e.record.key]), [['item', 'b/a'], ['strand', 's/1']]);
+});

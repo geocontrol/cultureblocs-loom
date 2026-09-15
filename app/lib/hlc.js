@@ -29,9 +29,12 @@ export function createClock(node, { now = () => Date.now(), last = null } = {}) 
       const t = now();
       return t > ms ? set(t, 0) : set(ms, counter + 1);
     },
-    /* Merge a stamp from elsewhere (an imported record); returns a local stamp after both. */
+    /* Merge a stamp from elsewhere (an imported record); returns a local stamp
+     * after both. A malformed stamp is ignored and this is a plain tick, as the
+     * String's hlc.py does — so a bad stored stamp cannot stop Loom starting. */
     observe(stamp) {
-      const r = parseStamp(stamp);
+      let r;
+      try { r = parseStamp(stamp); } catch { return clock.tick(); }
       const t = Math.max(now(), ms, r.ms);
       if (t === ms && t === r.ms) return set(t, Math.max(counter, r.counter) + 1);
       if (t === ms) return set(t, counter + 1);

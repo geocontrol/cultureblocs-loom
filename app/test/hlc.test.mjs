@@ -33,3 +33,9 @@ test('bad node ids and stamps are refused', () => {
   assert.throws(() => createClock('has space'));
   assert.throws(() => parseStamp('1757926800123.00000.d'));
 });
+
+test('a malformed stamp is ignored, as the String does: observe falls back to tick, and a clock still starts', () => {
+  const clock = createClock('d', { now: () => 1000, last: 'garbage from an old meta' });
+  assert.equal(clock.observe('not-a-stamp'), '0000000001000-00001-d');
+  assert.ok(clock.tick() > '0000000001000-00001-d');
+});

@@ -4,6 +4,7 @@ import { nameFromUri } from '../lib/media.js';
 import { html } from './html.js';
 
 const BEAD = 'com.cultureblocs.bead';
+const list = (v) => (Array.isArray(v) ? v : []);   // imported bodies are not validated: guard their shape
 
 export const KINDS = ['bloc', 'visit', 'dwell', 'encounter', 'read', 'listen', 'watch', 'screening', 'performance', 'note'];
 
@@ -30,11 +31,11 @@ function chips(r) {
   return html`${isUnsent(r) ? html`<span class="chip unsent">unsent</span>` : ''}${
     r.invalid?.length ? html`<span class="chip invalid" title="${r.invalid.join('\n')}">invalid</span>` : ''}${
     r.missing?.length ? html`<span class="chip missing" title="${r.missing.join('\n')}">photo missing</span>` : ''}${
-    (r.body.tags || []).map((t) => html`<span class="chip">${t}</span>`)}`;
+    list(r.body.tags).map((t) => html`<span class="chip">${t}</span>`)}`;
 }
 
 function photos(r, urls) {
-  const imgs = (r.body.media || []).map((m) => {
+  const imgs = list(r.body.media).map((m) => {
     const url = urls.get(nameFromUri(m?.uri));
     return url ? html`<img src="${url}" alt="${m.alt || ''}">` : '';
   });

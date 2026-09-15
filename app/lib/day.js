@@ -4,6 +4,7 @@
 import { keyFromItemUri } from './keys.js';
 
 const STRAND = 'com.cultureblocs.strand';
+const list = (v) => (Array.isArray(v) ? v : []);   // imported bodies are not validated: guard their shape
 
 /* Made in Loom and not on the String: lives only in this browser. */
 export const isLoomOnly = (r) => r.sourceApp === 'loom' && !r.stringId;
@@ -28,8 +29,11 @@ export function monthDays(records) {
 }
 
 /* A day's string: [{ kind: 'strand', record, members } | { kind: 'item', record }],
- * ordered by the earliest time in each entry. Members of a strand appear only
- * inside it. `allRecords` resolves members that were made on another day. */
+ * ordered by the earliest time in each entry. Within this one day's string, a
+ * strand's members appear only inside it (a member claimed by two strands
+ * appears in both). `allRecords` resolves members made on another day — and a
+ * bead also shows on its own day, loose if no strand of that day wraps it:
+ * it is a fact of the day it happened. */
 export function dayString(dayRecordsIn, allRecords = dayRecordsIn) {
   const dayRecords = dayRecordsIn.filter((r) => !isReleased(r));
   const byKey = new Map(allRecords.filter((r) => !isReleased(r)).map((r) => [r.key, r]));
@@ -37,7 +41,7 @@ export function dayString(dayRecordsIn, allRecords = dayRecordsIn) {
   const strands = dayRecords.filter((r) => r.type === STRAND);
   const inStrand = new Set();
   const entries = strands.map((s) => {
-    const members = (s.body.items || [])
+    const members = list(s.body?.items)
       .map((it) => byKey.get(keyFromItemUri(it.uri)))
       .filter(Boolean);
     members.forEach((m) => inStrand.add(m.key));

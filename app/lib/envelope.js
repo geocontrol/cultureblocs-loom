@@ -8,6 +8,7 @@
 import { anchorProblems } from '../vendor/refs.js';
 import { createClock } from './hlc.js';
 import { dayOf, recordKey } from './keys.js';
+import { mediaNames } from './media.js';
 import { tidGenerator } from './tid.js';
 
 export const BEAD = 'com.cultureblocs.bead';
@@ -88,11 +89,17 @@ export async function openLoom({ store, registry, now = () => Date.now(), newDev
     if (!current) throw new Error(`no record ${key}`);
     if (expectUpdatedAt !== undefined && current.updatedAt !== expectUpdatedAt) throw new Conflict(current);
     check(current.type, body);
+    // The body just passed the gate, so an import's `invalid` flag no longer
+    // applies; `missing` keeps only photos the new body still uses.
+    const { invalid: _, missing = [], ...rest } = current;
     const env = {
-      ...current, body, updatedAt: iso(), hlc: await stamp(), deviceId,
+      ...rest, body, updatedAt: iso(), hlc: await stamp(), deviceId,
       state: current.state === 'proposal' ? 'kept' : current.state,
       day: dayOf(current.type, body, current.createdAt),
     };
+    const used = new Set(mediaNames(body));
+    const still = (Array.isArray(missing) ? missing : []).filter((n) => used.has(n));
+    if (still.length) env.missing = still;
     await store.putRecord(env);
     await store.deleteMeta(`draft:${key}`);
     return env;

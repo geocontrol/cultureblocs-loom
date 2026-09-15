@@ -7,7 +7,7 @@ import { openLoom } from '../lib/envelope.js';
 import { createMemStore } from '../lib/memstore.js';
 import { mountCompose, newStrand } from '../ui/compose.js';
 import { mountMint } from '../ui/mint.js';
-import { mountPanel } from '../ui/string-panel.js';
+import { localChangeCount, mountPanel } from '../ui/string-panel.js';
 import { mountThread } from '../ui/thread.js';
 import { BACKUP_TYPE } from '../lib/backup.js';
 import { registry, steppingNow } from './helpers.mjs';
@@ -258,4 +258,18 @@ test('the panel shows a failed backup in its status line', async () => {
   await root.fire('click', button('backup'));
   assert.ok(alertIn(root));
   assert.match(root.innerHTML, /storage is gone/);
+});
+
+test('local changes to records on the String are counted by hash and state, sent or imported alike', async () => {
+  const { contentHash } = await import('../vendor/strip.js');
+  const body = { note: 'a' }, h = await contentHash(body);
+  const base = { stringId: 's', body, importedHash: h, importedState: 'kept', state: 'kept' };
+  const records = [
+    { ...base, sentAt: '2026-09-15T10:00:00Z', updatedAt: '2026-09-15T09:00:00Z', body: { note: 'linked, but differs' } },
+    { ...base, sentAt: '2026-09-15T09:00:00Z', updatedAt: '2026-09-15T10:00:00Z' },   // written after sending, same body
+    { ...base, state: 'released' },
+    { ...base },
+    { sourceApp: 'loom', body },                                                        // not on the String
+  ];
+  assert.deepEqual(await Promise.all(records.map((r) => localChangeCount([r]))), [1, 0, 1, 0, 0]);
 });

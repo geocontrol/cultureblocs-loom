@@ -44,7 +44,7 @@ Open **string** in the bar, point it at your String (`http://localhost:8100`),
 the String; **download backup** keeps a copy of everything in this browser.
 Phase 1 is desk-first on `localhost`: a phone needs Loom served over HTTPS.
 
-    node --test app/test/*.test.mjs        # the app's tests, no dependencies
+    node --test app/test/*.test.mjs        # the app's tests, no dependencies (Node ≥ 22.7)
     scripts/vendor-sdk.sh                  # refresh app/vendor from ../cultureblocs-string
 
 `app/test/store.html` (served at `/test/store.html`) runs the storage

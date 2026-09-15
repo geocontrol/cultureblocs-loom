@@ -8,8 +8,9 @@ import { KINDS } from './view-thread.js';
 import { refsView } from './view-refs.js';
 
 const STRAND = 'com.cultureblocs.strand';
+const list = (v) => (Array.isArray(v) ? v : []);   // imported bodies are not validated: guard their shape
 
-const linksText = (links) => (links || []).map((l) => (l.title ? `${l.uri} | ${l.title}` : l.uri)).join('\n');
+const linksText = (links) => list(links).map((l) => (l.title ? `${l.uri} | ${l.title}` : l.uri)).join('\n');
 
 export function parseLinks(text) {
   return String(text ?? '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
@@ -26,7 +27,7 @@ export function composeView(state) {
     restoredDraftAt = null, discardArmed = false } = state;
   const isStrand = record.type === STRAND;
   const text = isStrand ? body.narrative || '' : body.note || '';
-  const included = new Set((body.items || []).map((it) => keyFromItemUri(it.uri)));
+  const included = new Set(list(body.items).map((it) => keyFromItemUri(it?.uri)));
   return html`
     <form class="compose" data-type="${record.type}">
       <header>
@@ -49,10 +50,10 @@ export function composeView(state) {
       <label>links, one per line: url | label <textarea name="links" rows="2">${linksText(body.links)}</textarea></label>
       ${isStrand ? html`
         <fieldset class="items"><legend>beads in this entry</legend>
-          <ol>${(body.items || []).map((it, i) => {
-            const key = keyFromItemUri(it.uri);
+          <ol>${list(body.items).map((it, i) => {
+            const key = keyFromItemUri(it?.uri);
             const bead = dayBeads.find((b) => b.key === key);
-            return html`<li data-item="${i}">${bead ? `${bead.createdAt.slice(11, 16)} ${bead.body.kind} ${bead.body.note || ''}`.slice(0, 80) : it.uri}
+            return html`<li data-item="${i}">${bead ? `${bead.createdAt.slice(11, 16)} ${bead.body.kind} ${bead.body.note || ''}`.slice(0, 80) : it?.uri}
               <button type="button" data-action="item-up">↑</button><button type="button" data-action="item-down">↓</button>
               <button type="button" data-action="item-remove">remove</button></li>`;
           })}</ol>
@@ -63,9 +64,9 @@ export function composeView(state) {
         </fieldset>`
       : html`
         <fieldset class="photos"><legend>photos</legend>
-          <div class="thumbs">${(body.media || []).map((m, i) => html`
-            <figure data-photo="${i}">${urls.get(nameFromUri(m.uri)) ? html`<img src="${urls.get(nameFromUri(m.uri))}" alt="">` : ''}
-              <input name="alt-${i}" placeholder="what it shows" value="${m.alt || ''}">
+          <div class="thumbs">${list(body.media).map((m, i) => html`
+            <figure data-photo="${i}">${urls.get(nameFromUri(m?.uri)) ? html`<img src="${urls.get(nameFromUri(m?.uri))}" alt="">` : ''}
+              <input name="alt-${i}" placeholder="what it shows" value="${m?.alt || ''}">
               <button type="button" data-action="photo-remove">remove</button></figure>`)}</div>
           <input type="file" accept="image/*" multiple data-action="photo-add">
         </fieldset>`}

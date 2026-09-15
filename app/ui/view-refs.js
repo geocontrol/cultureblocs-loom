@@ -25,8 +25,9 @@ const idsText = (ids) => (ids || []).map((e) => `${e.scheme}:${e.id}`).join('\n'
 export function refsView(refs, text) {
   return html`
     <div class="refs">
-      ${(refs || []).map((ref, i) => {
-        const d = ref.descriptor || {};
+      ${(Array.isArray(refs) ? refs : []).map((ref, i) => {
+        const d = ref?.descriptor || {};
+        ref = ref || {};
         const covered = ref.index ? anchoredText(text || '', ref.index) : null;
         return html`
         <fieldset class="ref" data-ref="${i}">

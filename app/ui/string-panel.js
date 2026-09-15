@@ -8,12 +8,14 @@ import { stringClient } from '../lib/string-client.js';
 import { errorLine, surfaceErrors } from './html.js';
 import { panelView } from './view-panel.js';
 
-async function localChangeCount(records) {
+/* Records on the String whose body or state differ from what was last imported
+ * or sent — the same test import uses, so sent, linked and released records
+ * count exactly when import would call them changed in Loom. */
+export async function localChangeCount(records) {
   let n = 0;
   for (const r of records) {
     if (!r.stringId) continue;
-    if (r.sentAt ? r.updatedAt > r.sentAt
-      : (await contentHash(r.body)) !== r.importedHash || r.state !== r.importedState) n += 1;
+    if ((await contentHash(r.body)) !== r.importedHash || r.state !== r.importedState) n += 1;
   }
   return n;
 }

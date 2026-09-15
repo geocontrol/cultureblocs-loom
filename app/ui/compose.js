@@ -20,13 +20,14 @@ export async function newStrand(ctx, { day, wrap }) {
     if (bead) {
       body.items.push({ uri: itemUri(bead.key) });
       // The bead's refs are offered as mentions; its subject is not necessarily the entry's.
-      const refs = (bead.body.refs || []).map(({ index: _, ...r }) => ({ ...r, role: 'mention' }));
+      const refs = list(bead.body?.refs).filter((r) => r && typeof r === 'object').map(({ index: _, ...r }) => ({ ...r, role: 'mention' }));
       if (refs.length) body.refs = refs;
     }
   }
   return ctx.loom.create(STRAND, body, { origin: 'compose', state: 'draft' });
 }
 
+const list = (v) => (Array.isArray(v) ? v : []);   // imported bodies are not validated: guard their shape
 const textField = (type) => (type === STRAND ? 'narrative' : 'note');
 const EDITABLE = [BEAD, STRAND];
 
@@ -67,7 +68,7 @@ export async function mountCompose(root, ctx, { key }) {
     const slot = root.querySelector('.problems-slot');
     if (slot) slot.innerHTML = String(problemsView(list));
     root.querySelectorAll('button[data-action="save"], button[data-action="finish"]').forEach((b) => { b.disabled = list.length > 0; });
-    (state.body.refs || []).forEach((ref, i) => {
+    list(state.body.refs).forEach((ref, i) => {
       const hint = root.querySelector(`[data-hint="${i}"]`);
       if (hint) hint.textContent = publishHint(ref);
     });
@@ -175,7 +176,7 @@ export async function mountCompose(root, ctx, { key }) {
     state.error = '';
     const refIndex = Number(button.closest('[data-ref]')?.dataset.ref);
     const itemIndex = Number(button.closest('[data-item]')?.dataset.item);
-    const items = state.body.items || [];
+    const items = list(state.body.items);
     if (action === 'save') return save();
     if (action === 'finish') return save({ finish: true });
     if (action === 'keep-mine') return save({ expectUpdatedAt: state.conflict.updatedAt });
@@ -196,7 +197,7 @@ export async function mountCompose(root, ctx, { key }) {
       return;
     }
     if (action === 'add-ref') {
-      state.body.refs = [...(state.body.refs || []), { type: 'work', role: 'subject', descriptor: { label: '' } }];
+      state.body.refs = [...list(state.body.refs), { type: 'work', role: 'subject', descriptor: { label: '' } }];
     } else if (action === 'remove-ref') {
       state.body.refs.splice(refIndex, 1);
       if (!state.body.refs.length) delete state.body.refs;
@@ -232,7 +233,7 @@ export async function mountCompose(root, ctx, { key }) {
     for (const file of e.target.files) {
       const { blob, width, height } = await preparePhoto(file);
       const uri = await putPhoto(ctx.store, blob);
-      state.body.media = [...(state.body.media || []), { uri, mime: blob.type, aspectRatio: { width, height } }];
+      state.body.media = [...list(state.body.media), { uri, mime: blob.type, aspectRatio: { width, height } }];
     }
     scheduleDraft();
     await render();

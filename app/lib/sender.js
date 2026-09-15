@@ -32,7 +32,7 @@ export function planSend(records) {
   }
   for (const s of unsent.filter((r) => r.type === STRAND)) {
     if (s.state === 'draft') { held.push({ key: s.key, reason: 'still a draft' }); continue; }
-    const waiting = (s.body.items || []).map((it) => keyFromItemUri(it.uri)).filter(Boolean)
+    const waiting = (Array.isArray(s.body?.items) ? s.body.items : []).map((it) => keyFromItemUri(it?.uri)).filter(Boolean)
       .filter((k) => !byKey.get(k)?.stringId && !going.has(k));
     if (waiting.length) held.push({ key: s.key, reason: `waiting for ${waiting.join(', ')}` });
     else ready.push(s);
@@ -56,8 +56,8 @@ export async function runSend({ store, client, now = () => Date.now(), onProgres
       let body = env.body;
       if (env.type === STRAND) {
         const items = [];
-        for (const it of body.items || []) {
-          const key = keyFromItemUri(it.uri);
+        for (const it of Array.isArray(body.items) ? body.items : []) {
+          const key = keyFromItemUri(it?.uri);
           if (!key) { items.push(it); continue; }
           const member = await store.getRecord(key);
           if (!member?.stringId) throw new Error(`item ${key} is not on the String`);

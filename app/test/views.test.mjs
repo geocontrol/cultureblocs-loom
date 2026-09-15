@@ -131,3 +131,12 @@ test('index.html declares the content security policy', () => {
   const page = readFileSync(join(APP, 'index.html'), 'utf8');
   assert.match(page, /<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; connect-src \*; worker-src 'self'; manifest-src 'self'">/);
 });
+
+test('a shape-wrong imported record still renders: tags, media, items, refs and links that are not lists', () => {
+  const odd = bead(`${B}/o`, { body: { $type: B, createdAt: '2026-09-14T21:04:00Z', kind: 'bloc', tags: 'art', media: 'x', refs: 'y', links: 'z' } });
+  const out = String(dayView([{ kind: 'item', record: odd }], { day: '2026-09-14' }));
+  assert.match(out, /bloc/);
+  const strandOdd = { key: `${S}/o`, type: S, state: 'kept', day: '2026-09-14', body: { items: 'nope', refs: {}, links: 'l' } };
+  assert.match(String(composeView({ record: strandOdd, body: strandOdd.body })), /beads in this entry/);
+  assert.match(String(composeView({ record: odd, body: odd.body })), /photos/);
+});

@@ -114,3 +114,25 @@ test('drafts persist until saved or discarded', async () => {
   await l.save(bead.key, { ...bead.body, note: 'done' });
   assert.equal(await l.getDraft(bead.key), undefined);
 });
+
+test('saving recomputes the flags an import set: invalid goes, and missing keeps only photos still used', async () => {
+  const { store, loom: l } = await loom();
+  const bead = await l.mint({ note: 'x' });
+  const kept = `/media/${'a'.repeat(64)}.jpg`, dropped = `/media/${'b'.repeat(64)}.jpg`;
+  await store.putRecord({ ...bead, body: { ...bead.body, media: [{ uri: kept }, { uri: dropped }] },
+    invalid: ['$.kind: required field missing'], missing: [kept.slice(7), dropped.slice(7)] });
+  const saved = await l.save(bead.key, { ...bead.body, media: [{ uri: kept }] });
+  assert.equal('invalid' in saved, false);
+  assert.deepEqual(saved.missing, [kept.slice(7)]);
+  const none = await l.save(bead.key, { ...bead.body });
+  assert.equal('missing' in none, false);
+});
+
+test('newStrand ignores a wrapped bead whose refs are not a list', async () => {
+  const { store, loom: l } = await loom();
+  const bead = await l.mint({ note: 'x' });
+  await store.putRecord({ ...bead, body: { ...bead.body, refs: 'not a list' } });
+  const { newStrand } = await import('../ui/compose.js');
+  const strand = await newStrand({ store, loom: l, now: () => Date.parse('2026-09-15T10:00:00Z') }, { wrap: bead.key });
+  assert.equal('refs' in strand.body, false);
+});
