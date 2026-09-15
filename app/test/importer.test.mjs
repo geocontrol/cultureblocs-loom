@@ -1,0 +1,114 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { planImport, runImport } from '../lib/importer.js';
+import { createMemStore } from '../lib/memstore.js';
+import { mediaName, sha256Hex } from '../lib/media.js';
+import { contentHash } from '../vendor/strip.js';
+import { fakeString, photo } from './fake-string.mjs';
+import { registry } from './helpers.mjs';
+
+const B = 'com.cultureblocs.bead', S = 'com.cultureblocs.strand';
+const T = '2026-09-13T10:00:00Z';
+const bead = (id, note, extra = {}) => ({ id, type: B, sourceApp: 'pocket', createdAt: T, state: 'kept', hlc: null,
+  body: { $type: B, createdAt: T, kind: 'bloc', note }, ...extra });
+
+async function nameOf(blob) {
+  return mediaName(await sha256Hex(new Uint8Array(await blob.arrayBuffer())), blob.type);
+}
+
+test('first import adds records, rewrites strand items to local keys, fetches photos', async () => {
+  const pic = photo();
+  const name = await nameOf(pic);
+  const s = fakeString({
+    records: [
+      bead('u1', 'with a photo', { body: { $type: B, createdAt: T, kind: 'bloc', note: 'p', media: [{ uri: `/media/${name}` }] } }),
+      bead('u2', 'plain'),
+      { id: 'u3', type: S, sourceApp: 'timeline', createdAt: T, state: 'draft',
+        body: { $type: S, createdAt: T, title: 'Saturday', items: [{ uri: 'spine://records/u1' }, { uri: 'spine://records/elsewhere' }] } },
+    ],
+    media: { [name]: pic },
+  });
+  const store = createMemStore();
+  const { counts, conflicts } = await runImport({ store, registry: await registry(), client: s.client, now: () => 1 });
+  assert.equal(counts.add, 3);
+  assert.equal(counts.photos, 1);
+  assert.deepEqual(conflicts, []);
+  const strand = await store.getRecord(`${S}/u3`);
+  assert.deepEqual(strand.body.items, [{ uri: `loom://${B}/u1` }, { uri: 'spine://records/elsewhere' }]);
+  assert.equal(strand.state, 'draft');
+  assert.equal(strand.stringId, 'u3');
+  assert.equal(strand.origin, 'import');
+  assert.ok(await store.getBlob(name.slice(0, 64)));
+  assert.equal(await store.getMeta('lastImportAt'), new Date(1).toISOString());
+});
+
+test('re-import: unchanged, updated from the String, and conflicts left alone', async () => {
+  const s = fakeString({ records: [bead('u1', 'one'), bead('u2', 'two'), bead('u3', 'three')] });
+  const store = createMemStore();
+  const reg = await registry();
+  await runImport({ store, registry: reg, client: s.client });
+
+  s.records[1].body.note = 'two, edited on the String';                 // u2: String changed
+  s.records[2].body.note = 'three, edited on the String';               // u3: both changed
+  const u3 = await store.getRecord(`${B}/u3`);
+  await store.putRecord({ ...u3, body: { ...u3.body, note: 'three, edited in Loom' } });
+
+  const { counts, conflicts } = await runImport({ store, registry: reg, client: s.client });
+  assert.deepEqual([counts.add, counts.update, counts.unchanged, counts.conflict], [0, 1, 1, 1]);
+  assert.deepEqual(conflicts, [`${B}/u3`]);
+  assert.equal((await store.getRecord(`${B}/u2`)).body.note, 'two, edited on the String');
+  assert.equal((await store.getRecord(`${B}/u3`)).body.note, 'three, edited in Loom');
+});
+
+test('keeping an imported proposal in Loom is a local change the String does not overwrite', async () => {
+  const s = fakeString({ records: [bead('u1', '5 tracks', { state: 'proposal', sourceApp: 'scrobbler' })] });
+  const store = createMemStore();
+  const reg = await registry();
+  await runImport({ store, registry: reg, client: s.client });
+  const local = await store.getRecord(`${B}/u1`);
+  await store.putRecord({ ...local, state: 'kept' });
+  s.records[0].body.note = '6 tracks';
+  const { conflicts } = await runImport({ store, registry: reg, client: s.client });
+  assert.deepEqual(conflicts, [`${B}/u1`]);
+  assert.equal((await store.getRecord(`${B}/u1`)).state, 'kept');
+});
+
+test('an invalid String record is imported and flagged, not dropped', async () => {
+  const s = fakeString({ records: [{ ...bead('u1', 'x'), body: { $type: B, createdAt: T } }] });
+  const store = createMemStore();
+  const { counts } = await runImport({ store, registry: await registry(), client: s.client });
+  assert.equal(counts.invalid, 1);
+  assert.deepEqual((await store.getRecord(`${B}/u1`)).invalid, ['$.kind: required field missing']);
+});
+
+test('a photo that cannot be fetched is recorded as missing and retried on the next import', async () => {
+  const pic = photo('later');
+  const name = await nameOf(pic);
+  const failMedia = new Set([name]);
+  const s = fakeString({ records: [bead('u1', 'p', { body: { $type: B, createdAt: T, kind: 'bloc', media: [{ uri: `/media/${name}` }] } })],
+    media: { [name]: pic }, failMedia });
+  const store = createMemStore();
+  const reg = await registry();
+  const first = await runImport({ store, registry: reg, client: s.client });
+  assert.equal(first.counts.missing, 1);
+  assert.deepEqual((await store.getRecord(`${B}/u1`)).missing, [name]);
+  failMedia.clear();
+  const second = await runImport({ store, registry: reg, client: s.client });
+  assert.equal(second.counts.photos, 1);
+  assert.equal('missing' in (await store.getRecord(`${B}/u1`)), false);
+});
+
+test('planImport is decided by hashes and states alone', async () => {
+  const rec = bead('u1', 'x');
+  const h = await contentHash(rec.body);
+  const local = { key: `${B}/u1`, body: rec.body, state: 'kept', stringHash: h, importedHash: h, importedState: 'kept' };
+  assert.equal((await planImport([rec], new Map([['u1', local]])))[0].action, 'unchanged');
+  assert.equal((await planImport([{ ...rec, state: 'proposal' }], new Map([['u1', local]])))[0].action, 'update');
+});
+
+test('a server that is not a String is refused before anything is read', async () => {
+  const store = createMemStore();
+  const client = { async health() { throw new Error('http://localhost:8100/health: this does not look like a String'); } };
+  await assert.rejects(runImport({ store, registry: await registry(), client }), /does not look like a String/);
+  assert.deepEqual(await store.allRecords(), []);
+});
