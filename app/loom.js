@@ -1,34 +1,60 @@
-/* The shell: open the store, route between surfaces, choose a posture,
- * keep tabs in step, and take service-worker updates only when no edit is
- * pending. */
-import { openLoom } from './lib/envelope.js';
-import { hashFromName } from './lib/media.js';
+/* The shell: open the store (bringing Phase 1 data to the desk's model), keep
+ * the top bar and the String column mounted, route the editor column, keep
+ * tabs in step, and take service-worker updates only when no edit is pending.
+ *
+ *   #/                    today, at a glance
+ *   #/day/<YYYY-MM-DD>    a day, at a glance
+ *   #/new/bead?day=…      reserve a key, then #/edit/<key>?new=1&day=…
+ *   #/new/strand?day=…    the same, for a strand
+ *   #/edit/<key>?day=…    the form for a record, or for a new one not yet saved
+ *                         (a key with neither record nor draft opens a form only with new=1)
+ *   #/send                what is waiting, and the last Send's results
+ *   #/settings            String address and token, import, backup, restore
+ *
+ * Phase 1 addresses (#/thread, #/mint, #/compose, #/string) redirect here (lib/routing.js).
+ *
+ * On a narrow screen the page shows one column at a time: the String for #/
+ * and #/day, the editor for everything else (body[data-view], loom.css). */
+import { BEAD, STRAND, openLoom } from './lib/envelope.js';
 import { loadRegistry } from './lib/lexicons.js';
-import { postureFor, routeSerializer } from './lib/routing.js';
+import { hashFromName } from './lib/media.js';
+import { migrateStore } from './lib/migrate.js';
+import { phase1Redirect, routeSerializer } from './lib/routing.js';
 import { openStore } from './lib/store.js';
-import { mountCompose, newStrand } from './ui/compose.js';
-import { mountMint } from './ui/mint.js';
-import { mountPanel } from './ui/string-panel.js';
-import { mountThread } from './ui/thread.js';
+import { mountEditor } from './ui/editor.js';
+import { mountDay, mountSend, mountTopbar } from './ui/pages.js';
+import { mountSettings } from './ui/settings.js';
+import { mountString } from './ui/string.js';
 
 const $ = (sel) => document.querySelector(sel);
 const channel = 'BroadcastChannel' in self ? new BroadcastChannel('loom') : null;
 const urls = new Map();
-const wide = matchMedia('(min-width: 900px)');
 const begin = routeSerializer();
+const NEW = { bead: BEAD, strand: STRAND };
 let mounted = [];
 let dirty = false;
 
 async function boot() {
   const store = await openStore();
+  await migrateStore(store);
   const registry = await loadRegistry(async (p) => (await fetch(p)).json(), './vendor/lexicons/');
   const loom = await openLoom({ store, registry });
+  let topbar = null, column = null;
+
+  const refreshAll = () => {
+    if (dirty) return;
+    for (const surface of [topbar, column, ...mounted]) surface?.render?.()?.catch?.((err) => console.error(err));
+  };
 
   const ctx = {
     store, registry, loom,
     now: () => Date.now(),
     fetch: (...a) => fetch(...a),
-    broadcast: (kind = 'changed') => channel?.postMessage(kind),
+    /* Something changed: other tabs hear it, and this tab's surfaces show it. */
+    broadcast(kind = 'changed') {
+      channel?.postMessage(kind);
+      if (kind !== 'restored') refreshAll();
+    },
     reload: reloadWhenClean,
     navigate: (hash) => { location.hash = hash; },
     setDirty: (d) => { dirty = d; },
@@ -47,74 +73,73 @@ async function boot() {
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
     },
-    applyPosture,
+    desk: {
+      results: [], busy: false, tick: null,
+      refreshColumn: () => column?.render().catch((err) => console.error(err)),
+      refresh: () => { topbar?.render().catch((err) => console.error(err)); mounted.forEach((m) => m.render?.()?.catch?.((err) => console.error(err))); },
+    },
   };
-
-  async function applyPosture() {
-    const posture = postureFor(await store.getMeta('posture'), wide.matches);
-    document.body.dataset.posture = posture;
-    return posture;
-  }
 
   async function route() {
     try {
       await routeNow();
     } catch (err) {
-      $('#main').textContent = `Could not open this page: ${err.message}`;
+      $('#editor').textContent = `Could not open this page: ${err.message}`;
       console.error(err);
     }
   }
 
   async function routeNow() {
     const current = begin();
-    for (const m of mounted) m.unmount?.();
+    await Promise.all(mounted.map((m) => m.unmount?.()));
     mounted = [];
-    const posture = await applyPosture();
     if (!current.current) return;
+    const old = phase1Redirect(location.hash);
+    if (old) {
+      location.replace(old);                          // a Phase 1 bookmark: the desk's nearest surface
+      return;
+    }
     const [path, query = ''] = location.hash.replace(/^#\/?/, '').split('?');
     const [surface = '', ...rest] = path.split('/');
-    const params = new URLSearchParams(query);
-    // Each route renders into its own containers: a route overtaken mid-mount
-    // keeps writing only into containers that are no longer on the page.
-    const main = document.createElement('div'), side = document.createElement('div');
-    $('#main').replaceChildren(main);
-    $('#side').replaceChildren();
-    document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('on', a.dataset.nav === (surface || 'home')));
-    document.body.dataset.surface = surface || 'home';
     const arg = decodeURIComponent(rest.join('/'));
+    const params = new URLSearchParams(query);
+    const today = new Date(ctx.now()).toISOString().slice(0, 10);
 
-    if (!surface) {
-      location.replace(posture === 'totem' ? '#/mint' : '#/thread');
+    if (surface === 'new' && NEW[arg]) {
+      const day = params.get('day');
+      location.replace(`#/edit/${loom.newKey(NEW[arg])}?new=1${day ? `&day=${day}` : ''}`);
       return;
     }
-    if (surface === 'compose' && arg === 'new') {
-      const strand = await newStrand(ctx, { day: params.get('day'), wrap: params.get('wrap') });
-      ctx.broadcast();
-      if (current.current) location.replace(`#/compose/${strand.key}`);
-      return;
-    }
-    if (surface === 'thread') current.keep(await mountThread(main, ctx, { period: arg }), mounted);
-    else if (surface === 'mint') current.keep(await mountMint(main, ctx), mounted);
-    else if (surface === 'string') current.keep(await mountPanel(main, ctx), mounted);
-    else if (surface === 'compose') {
+    // Each route renders into its own container: a route overtaken mid-mount
+    // keeps writing only into a container that is no longer on the page.
+    const pane = document.createElement('div');
+    $('#editor').replaceChildren(pane);
+    document.body.dataset.view = !surface || surface === 'day' ? 'column' : 'editor';
+
+    if (!surface || surface === 'day') {
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(arg) ? arg : today;
+      await column.show({ day, key: '' });
+      current.keep(await mountDay(pane, ctx, { day }), mounted);
+    } else if (surface === 'edit') {
       const record = await store.getRecord(arg);
       if (!current.current) return;
-      if (posture === 'desk' && record?.day) {
-        if (!current.keep(await mountThread(main, ctx, { period: record.day }), mounted)) return;
-      }
-      if (posture === 'desk') $('#side').replaceChildren(side);
-      current.keep(await mountCompose(posture === 'desk' ? side : main, ctx, { key: arg }), mounted);
-    } else main.textContent = 'Nothing here.';
+      await column.show({ day: record?.day || params.get('day') || '', key: arg });
+      current.keep(await mountEditor(pane, ctx, { key: arg, day: params.get('day') || '', isNew: params.get('new') === '1' }), mounted);
+    } else if (surface === 'send') {
+      current.keep(await mountSend(pane, ctx), mounted);
+    } else if (surface === 'settings') {
+      current.keep(await mountSettings(pane, ctx), mounted);
+    } else {
+      pane.textContent = 'Nothing here.';
+    }
   }
 
+  topbar = await mountTopbar($('#bar'), ctx);
+  column = await mountString($('#column'), ctx, {});
   window.addEventListener('hashchange', route);
-  // Crossing the width breakpoint re-routes only if it changes the posture.
-  wide.addEventListener('change', async () => {
-    if (postureFor(await store.getMeta('posture'), wide.matches) !== document.body.dataset.posture) route();
-  });
   channel?.addEventListener('message', (e) => {
     if (e.data === 'restored') reloadWhenClean();   // another tab replaced the store
-    else if (!dirty) mounted.forEach((m) => m.render?.());
+    else refreshAll();
   });
 
   await route();
@@ -142,7 +167,7 @@ function requestPersistence() {
     if (!navigator.storage?.persist || (await navigator.storage.persisted())) return;
     if (!(await navigator.storage.persist())) {
       const banner = $('#banner');
-      banner.textContent = 'This browser may clear Loom’s storage — back up from the string panel.';
+      banner.textContent = 'This browser may clear Loom’s storage — back up from settings.';
       banner.hidden = false;
     }
   })().catch((err) => console.error(err));
@@ -175,6 +200,6 @@ async function registerServiceWorker() {
 }
 
 boot().catch((err) => {
-  document.getElementById('main').textContent = `Loom could not start: ${err.message}`;
+  document.getElementById('editor').textContent = `Loom could not start: ${err.message}`;
   console.error(err);
 });

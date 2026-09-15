@@ -114,58 +114,56 @@ has to assert nested shapes, not just top-level keys.
 
 ## 3 · The shape of Loom
 
-One responsive page, one codebase, six surfaces. Vanilla ES modules and
-IndexedDB, in the manner of Easel and Pocket — no framework, no build
-step, served as static files (`:8108` in compose; deployable to
-cultureblocs.com like Pocket, because the OAuth client id must be a
-stable URL).
+One responsive page, one codebase. Vanilla ES modules and IndexedDB, in
+the manner of Easel and Pocket — no framework, no build step, served as
+static files (`:8108` in compose; deployable to cultureblocs.com like
+Pocket, because the OAuth client id must be a stable URL).
 
-    ┌ Thread ────────── the day, the month; beads, strands, proposals
-    ├ Mint ──────────── the button: a bead in two taps
-    ├ Compose ───────── the full entry: narrative, place, items, photos
+    ┌ The desk ──────── your String always in view, and an editor beside it
+    │   String column   calendar, the entries newest first, filter, proposals
+    │   Editor          a whole bead or a whole strand, in one form
+    │   Send            every change for the String: new, edited, kept, deleted
     ├ Feeds ─────────── connectors, their last run, their proposals
     ├ Vault ─────────── identities, connector credentials, devices
     └ Publish ───────── what is public, what has drifted, what to send
 
-**Posture, not two apps.** The ROADMAP is explicit that the phone is
-"a button, not a feed" and that the telling stays a desk ritual. One
-interface and that principle are in tension, and the tension is real —
-so resolve it with a **posture** rather than a second codebase. On a
-narrow viewport Loom opens in *totem posture*: Mint is the whole
-screen, the mask strip and the dot-matrix bloom exactly as Pocket does
-it. Thread is reachable, but by a deliberate gesture, never as the
-landing surface. On a wide viewport Loom opens in *desk posture*:
-Thread centre, Feeds and Publish in rails. Posture is a setting, so the
-principle is a default and not a cage.
+**The desk, not surfaces to switch between.** Loom is where the String
+is written and managed, so the String is never out of sight: a column
+with a month calendar over the entries, newest first, where proposals
+are kept or released in place. Choosing an entry opens it in the editor
+beside the column; **+ New bead** and **+ New strand** open an empty form
+there. On a narrow screen the same page stacks: the String column is the
+home screen and a form opens over it, with a way back.
 
-This is a deliberate softening of "no timeline on the phone". Worth
-knowing that is what it is.
+This replaces the earlier plan of a *posture* — a phone that opened on a
+two-tap Mint button and a desk that opened on Thread. A bead is wanted
+written whole, not minted and then finished, from the same page everywhere.
 
-### Two ways in, one mint fact
+### One way in, one mint fact
 
-**Quick bead.** Mask, optional line, press. Written to IndexedDB before
-anything else happens; no network on the critical path. `provenance.app
-= "loom"`, `provenance.mintedAt` = the press. This is a *mint fact* and
-is never rewritten by a machine.
+**A bead, whole.** Kind, when it happened, note, tags, place, photos,
+links and refs, in one form, saved once. Until Save there is only a
+draft, in this browser; Save validates the record and writes it.
+`provenance.app = "loom"` and `provenance.mintedAt` = the save. This is
+the *mint fact*, and it is fixed: provenance never changes after Save.
+The bead's content stays editable — a correction is an edit, recorded
+as one — on any bead on your String, whichever app made it.
 
-**Full entry.** A `com.cultureblocs.strand` composed as a diary page:
-title, `narrative` (10 000 graphemes — the field already exists and is
-unused by the timeline), place, links, photos, and the day's beads
-attached as `items`. Proposals for that day sit alongside, one press
-from being kept and included.
+**A strand, whole.** A `com.cultureblocs.strand` composed as a diary
+page: title, day, `narrative` (10 000 graphemes), place, links, refs,
+and the beads it strings together. While a strand is open, the beads in
+the String column carry tick boxes: ticking one puts it in the strand,
+in order, and ticking a proposal keeps it. The beads do not change —
+the strand points at them.
 
-**Growing one into the other.** A bead minted at 21:04 can be grown
-into an entry at breakfast. The bead does not change — the strand wraps
-it. The mint fact stays sacred; the telling accretes around it. This is
-the single most important interaction in the app and should be one
-button on a bead: *tell this*. The strand starts with any refs the bead
-already carries (§9), offered as mentions to be kept, not copied in
-silently — the bead's subject is not necessarily the telling's.
+**Refs.** Both forms carry the refs editor (§9.7): what the entry is
+about and what it reaches for, anchored in its text.
 
-**Refs.** Compose gains a refs rail (§9.7) listing what the entry is
-about and what it reaches for. It does not appear in totem posture:
-resolution is a desk ritual, and Mint on the phone does no resolution
-at all.
+**Send.** Everything waiting goes to the String on Send — new records,
+edits, proposals kept, records deleted — each against the version Loom
+last saw, so nothing overwrites a change made on the String meanwhile:
+that record is marked as a conflict, both versions are shown, and the
+person chooses. Two-way sync (§5) replaces Send in Phase 2.
 
 ---
 
@@ -189,7 +187,8 @@ PSS will hold, so sync is a copy rather than a translation:
 - **`state`** ∈ `proposal | kept | draft | published | edited`. Explicit,
   stored, synced — which retires R7. The dotted rail renders `proposal`,
   not a hardcoded list of app names.
-- **`origin`** ∈ `mint | connector:<id> | import | totem`. Provenance for
+- **`origin`** ∈ `loom | connector:<id> | import` (`mint` and `compose` on
+  records made before the desk). Provenance for
   the UI; `body.provenance` remains the record's own, and still never
   publishes.
 - **Blobs** content-addressed by SHA-256 in a second store, exactly as
@@ -680,7 +679,8 @@ counts from the AppView where available.
   suggested matches.* A pleasant optional activity, not a tax on
   capture.
 
-**Posture.** No rail in totem posture (§3).
+**Narrow screens.** The refs editor sits inside the form; there is no
+separate rail on a phone (§3).
 
 **Reverse entry.** Compose is prose first, entities extracted
 backwards. Mint from a search box is the other direction: resolve
@@ -806,6 +806,16 @@ Loom-made records reach it by a deliberate send over the String's
 existing API; desk-first on localhost, phone once hosted over HTTPS.
 Design: [`docs/superpowers/specs/2026-09-14-loom-phase1-design.md`](docs/superpowers/specs/2026-09-14-loom-phase1-design.md).
 
+**Phase 1b — the desk.** Loom becomes the place the String is written
+and managed (§3): the String column always in view, a bead or a strand
+written whole in one form, any bead or strand edited or deleted, and
+Send carrying every change — POST, PATCH with If-Match, state, DELETE
+with If-Match — with conflicts shown for the person to choose, ahead of
+Phase 2 sync. Mint, Thread and posture are retired. Two small String
+changes land first: PATCH removes a field sent as `null`, and DELETE
+honours `If-Match`.
+Design: [`docs/superpowers/specs/2026-09-15-loom-desk-authoring-design.md`](docs/superpowers/specs/2026-09-15-loom-desk-authoring-design.md).
+
 **Phase 2 — sync.** `com.cultureblocs.sync.server` discovery record;
 service-auth verification; `POST /changes` and `GET /sync`; grants
 table; CORS narrowed (R3, R4). Sign in on a second device and the
@@ -843,10 +853,6 @@ with real use, and whether anyone ever touched the backfill queue.
   minting `com.cultureblocs.sync.server` is better if the shapes agree
   — the same reasoning that made us adopt the community calendar
   lexicons rather than keep `venue.listing`.
-- **Whether the phone posture holds.** The ROADMAP says no timeline on
-  the phone and means it. §3 softens that to a default. If the softened
-  version turns the phone into a feed, the principle was right and the
-  posture should become a hard split again.
 - **How `concept` refs resolve.** Movements and genres — the SF New
   Wave, liminal horror — are not works, people, events or venues.
   Wikidata QIDs give a clean head and a bad tail; free tags are cheap

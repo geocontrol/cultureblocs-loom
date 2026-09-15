@@ -1,15 +1,22 @@
-/* The String's HTTP API, as Loom uses it in Phase 1 (import and send).
+/* The String's HTTP API, as Loom uses it (import and send).
  * Every error names the URL and the status, because "404" alone once meant a
- * different server was answering on the String's port. */
+ * different server was answering on the String's port. An error answer keeps
+ * its status and its parsed body (`detail`), so send can tell a stale version
+ * (412, with the String's current record) from invalid content (422). */
 
 export const LIST_LIMIT = 2000;   // the most one GET /records returns (the String caps limit here)
 
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isRecord = (b) => (isObject(b) && typeof b.id === 'string' && isObject(b.body)
+  ? null : 'expected a record with an id and an object body');
+const ifMatch = (hlc) => (hlc ? { 'If-Match': hlc } : {});
 
 export class StringError extends Error {
-  constructor(url, detail) {
-    super(`${url}: ${detail}`);
+  constructor(url, message, { status = null, detail = null } = {}) {
+    super(`${url}: ${message}`);
     this.url = url;
+    this.status = status;    // the HTTP status, or null when the String could not be reached
+    this.detail = detail;    // the answer's `detail`, when it sent one
   }
 }
 
@@ -25,7 +32,10 @@ export function stringClient(baseUrl, token, fetchImpl = globalThis.fetch.bind(g
     } catch (e) {
       throw new StringError(url, `unreachable (${e.message})`);
     }
-    if (!res.ok) throw new StringError(url, `HTTP ${res.status}`);
+    if (!res.ok) {
+      const detail = await res.json().then((b) => b?.detail ?? null, () => null);
+      throw new StringError(url, `HTTP ${res.status}`, { status: res.status, detail });
+    }
     return res;
   }
 
@@ -68,8 +78,7 @@ export function stringClient(baseUrl, token, fetchImpl = globalThis.fetch.bind(g
       return body.records;
     },
     async getRecord(id) {
-      return json(`/records/${encodeURIComponent(id)}`, (b) => (isObject(b) && typeof b.id === 'string' && isObject(b.body)
-        ? null : 'expected a record with an id and an object body'));
+      return json(`/records/${encodeURIComponent(id)}`, isRecord);
     },
     async getMedia(name) {
       return (await call(`/media/${encodeURIComponent(name)}`)).blob();
@@ -79,6 +88,20 @@ export function stringClient(baseUrl, token, fetchImpl = globalThis.fetch.bind(g
         ? null : `expected { results: [...] } with ${records.length} entries`),
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ records }) });
       return body.results;
+    },
+    /* Edit a record: `fields` merge into its body, a null removes a field.
+     * `hlc` is the version being edited; the String answers 412 if it moved on. */
+    async patchRecord(id, fields, hlc) {
+      return json(`/records/${encodeURIComponent(id)}`, isRecord, { method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...ifMatch(hlc) }, body: JSON.stringify({ fields }) });
+    },
+    async setState(id, state) {
+      return json(`/records/${encodeURIComponent(id)}/state`, isRecord,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state }) });
+    },
+    /* Delete a record, refused with 412 if `hlc` is no longer its version. */
+    async deleteRecord(id, hlc) {
+      await call(`/records/${encodeURIComponent(id)}`, { method: 'DELETE', headers: ifMatch(hlc) });
     },
     async postMedia(blob) {
       return json('/media', (b) => (typeof b?.uri === 'string' ? null : 'expected { uri, mime, bytes }'),

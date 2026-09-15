@@ -7,8 +7,10 @@
  * keeps its own identity through a restore: its String token, its device id
  * (two browsers must never stamp as one device) and a clock that only moves
  * forward. Those three are put back even if the restore fails part way; the
- * file being restored is still in the user's hands to retry. */
+ * file being restored is still in the user's hands to retry. A backup made by
+ * Phase 1 restores into the desk's model (migrate.js). */
 import { parseStamp } from './hlc.js';
+import { migrateStore } from './migrate.js';
 
 export const BACKUP_TYPE = 'com.cultureblocs.loom.backup';
 export const BACKUP_VERSION = 1;
@@ -82,6 +84,7 @@ export async function restoreBackup(store, doc) {
     for (const r of doc.records) await store.putRecord(r);
     for (const row of rows) await store.putBlob(row);
     for (const [k, v] of Object.entries(doc.meta || {})) if (!THIS_BROWSER.includes(k)) await store.setMeta(k, v);
+    await migrateStore(store);
   } finally {
     for (const [k, v] of Object.entries(kept)) if (v !== undefined) await store.setMeta(k, v);
   }

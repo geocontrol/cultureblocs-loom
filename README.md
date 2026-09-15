@@ -12,37 +12,38 @@ that needs no server of its own, and it turns
 you run one — into a **personal sync server** in the sense
 [Groundmist](https://groundmist.xyz/) describes.
 
-**Status: Phase 1 — local only.** Thread, Mint and Compose run in the
-browser with no server of their own; existing records arrive by a
-deliberate import from the String, and Loom-made ones reach it by a
-deliberate send, until Phase 2 sync. The full argument, the review of the
+**Status: Phase 1b — the desk.** Loom runs in the browser with no server
+of its own: your String in a column, a bead or a strand written whole
+beside it, and every change — new, edited, kept, deleted — sent to the
+String when you press Send, until Phase 2 sync. The full argument, the review of the
 String that motivated it, and the build order are in
 **[LOOM.md](LOOM.md)** — start there.
 
 ## What it is
 
-Six surfaces, one page, one codebase:
+One page, one codebase:
 
-    Thread     the day, the month; beads, strands, proposals
-    Mint       the button: a bead in two taps
-    Compose    the full entry: narrative, place, items, photos
+    The desk   your String in a column; a whole bead or strand in the editor; Send
     Feeds      connectors, their last run, their proposals
     Vault      identities, connector credentials, devices
     Publish    what is public, what has drifted, what to send
 
-Two ways in, one mint fact: a **quick bead** (offline, no network on
-the critical path) or a **full diary entry**. A bead minted at 21:04
-can be *grown* into an entry at breakfast — the bead does not change,
-the strand wraps it.
+One way in: a **bead, whole** — kind, time, note, tags, place, photos,
+links and refs in one form, saved once — or a **strand** that strings
+beads together, built by ticking them in the String column. Any bead or
+strand can be edited or deleted; its provenance never changes.
 
-## Running it (Phase 1)
+## Running it
 
     docker compose up -d          # http://localhost:8108
 
-Open **string** in the bar, point it at your String (`http://localhost:8100`),
-**check**, then **import**. Mint and write; **send** puts Loom-made records on
-the String; **download backup** keeps a copy of everything in this browser.
-Phase 1 is desk-first on `localhost`: a phone needs Loom served over HTTPS.
+Open **settings**, point Loom at your String (`http://localhost:8100`) with its
+token, **check**, then **import**. Write with **+ New bead** and **+ New strand**,
+edit or delete anything from the String column; **send** takes every change to
+the String, and a record changed on both sides is marked for you to choose.
+**download backup** keeps a copy of everything in this browser. The String
+needs cultureblocs-string with PATCH null-removal and DELETE If-Match. Loom is
+desk-first on `localhost`: a phone needs Loom served over HTTPS.
 
     node --test app/test/*.test.mjs        # the app's tests, no dependencies (Node ≥ 22.7)
     scripts/vendor-sdk.sh                  # refresh app/vendor from ../cultureblocs-string

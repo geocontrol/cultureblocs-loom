@@ -5,7 +5,7 @@ import { openLoom } from '../lib/envelope.js';
 import { createMemStore } from '../lib/memstore.js';
 import { putPhoto } from '../lib/media.js';
 import { photo } from './fake-string.mjs';
-import { registry, steppingNow } from './helpers.mjs';
+import { makeBead, registry, steppingNow } from './helpers.mjs';
 
 test('base64 round-trips bytes larger than one chunk', () => {
   const bytes = new Uint8Array(100_000).map((_, i) => i % 251);
@@ -16,7 +16,7 @@ test('backup then restore into an empty store gives back records, photos and set
   const store = createMemStore();
   const loom = await openLoom({ store, registry: await registry(), now: steppingNow(), newDeviceId: () => 'desk-1' });
   const uri = await putPhoto(store, photo('pixels'));
-  const bead = await loom.mint({ note: 'keep me' });
+  const bead = await makeBead(loom, { note: 'keep me' });
   await loom.save(bead.key, { ...bead.body, media: [{ uri }] });
   await store.setMeta('stringUrl', 'http://localhost:8100');
   await store.setMeta('stringToken', 'secret');
@@ -48,7 +48,7 @@ test('restore refuses anything that is not a Loom backup, and leaves the store a
 async function filled() {
   const store = createMemStore();
   const loom = await openLoom({ store, registry: await registry(), now: steppingNow(), newDeviceId: () => 'desk-1' });
-  await loom.mint({ note: 'the only copy' });
+  await makeBead(loom, { note: 'the only copy' });
   await store.setMeta('stringToken', 'secret');
   return store;
 }
@@ -99,4 +99,21 @@ test('a restore that fails part way through still puts back the token, device id
   assert.equal(await store.getMeta('stringToken'), 'secret');
   assert.equal(await store.getMeta('deviceId'), 'desk-1');
   assert.equal(await store.getMeta('hlc'), hlc);
+});
+
+test('a Phase 1 backup restores into the desk: released proposals become deletes waiting for Send, retired settings go', async () => {
+  const store = createMemStore();
+  const B = 'com.cultureblocs.bead';
+  const released = { key: `${B}/u1`, type: B, rkey: 'u1', state: 'released', stringId: 'u1', sourceApp: 'scrobbler',
+    createdAt: '2026-09-13T10:00:00Z', day: '2026-09-13', body: { $type: B, createdAt: '2026-09-13T10:00:00Z', kind: 'listen' } };
+  const kept = { ...released, key: `${B}/u2`, rkey: 'u2', stringId: 'u2', state: 'kept' };
+  const doc = { $type: BACKUP_TYPE, version: 1, exportedAt: '2026-09-15T00:00:00Z', records: [released, kept],
+    meta: { posture: 'desk', masks: ['ART'], mask: 'ART', stringUrl: 'http://localhost:8100' }, blobs: {} };
+  await restoreBackup(store, doc);
+  const r = await store.getRecord(`${B}/u1`);
+  assert.deepEqual([r.state, r.deleted], ['proposal', true]);
+  assert.deepEqual(await store.getRecord(`${B}/u2`), kept);
+  const meta = await store.allMeta();
+  assert.deepEqual(['posture', 'masks', 'mask'].filter((k) => k in meta), []);
+  assert.equal(meta.stringUrl, 'http://localhost:8100');
 });

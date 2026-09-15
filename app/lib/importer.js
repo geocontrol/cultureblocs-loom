@@ -1,37 +1,50 @@
-/* One-way import from the String (Phase 1; replaced by sync in Phase 2).
+/* Import from the String (replaced by sync in Phase 2).
  *
  * Re-runnable. Each String record is planned against its local copy:
  *   add        not held locally
  *   link       a record Loom sent (dedupeKey "loom:<rkey>") whose local copy
  *              lost its stringId, e.g. after restoring an older backup
  *   update     unchanged in Loom since the last import, changed on the String
- *   unchanged  the same on both sides
- *   conflict   changed on both sides: left alone and reported (merging is Phase 2)
+ *   unchanged  the same on both sides — or deleted in Loom and unchanged on
+ *              the String, waiting for Send
+ *   conflict   changed on both sides (a delete in Loom counts as a change),
+ *              or its provenance changed on the String:
+ *              the local record is kept and marked `conflict` with the String's
+ *              version (`theirs`) for the person to choose (conflicts.js)
  * "Changed in Loom" compares the local body with `importedHash` (its hash as
  * stored at import) and the state with `importedState`; "changed on the String"
  * compares the String's body with `stringHash` and its state with `importedState`.
  * Two hashes, because import rewrites a strand's items from spine:// to loom://.
+ * Every record also keeps what Send needs to edit it on the String: its version
+ * (`stringHlc`), the top-level keys of its body (`stringKeys`) and the photos it
+ * uses there (`stringMedia`).
  *
  * Every write re-reads the local record first: the network awaits in between
  * give another tab time to save, and a stale snapshot must never undo that. */
 import { contentHash } from '../vendor/strip.js';
-import { dayOf, idFromSpineUri, recordKey, toLoomItems } from './keys.js';
+import { dayOf, idFromSpineUri, recordKey, same, toLoomItems } from './keys.js';
 import { hashFromName, mediaNames } from './media.js';
 
 const STRAND = 'com.cultureblocs.strand';
 const LOOM_DEDUPE = 'loom:';
+
+/* What Send needs to know about the String's copy of a record. */
+export const stringFields = (rec) => ({ stringHlc: rec.hlc ?? null,
+  stringKeys: Object.keys(rec.body || {}), stringMedia: mediaNames(rec.body) });
 
 /* The action for one String record against one local record (held under its stringId). */
 async function decide(rec, local) {
   const stringState = rec.state || 'kept';
   const bodyChanged = (await contentHash(rec.body)) !== local.stringHash;
   const stringChanged = bodyChanged || stringState !== local.importedState;
+  // Deleted in Loom: never re-added or updated. If the String changed it since,
+  // the person chooses — an 'unchanged' here would refresh `stringHlc` onto the
+  // tombstone, and Send's DELETE would then carry the new version and wipe the change.
+  if (local.deleted) return stringChanged ? 'conflict' : 'unchanged';
   if (!stringChanged) return 'unchanged';
+  if (bodyChanged && !same(rec.body?.provenance, local.body?.provenance)) return 'conflict';   // provenance is fixed
   const loomChanged = (await contentHash(local.body)) !== local.importedHash || local.state !== local.importedState;
-  if (loomChanged) return 'conflict';        // a released tombstone is a local change too
-  // Mint facts are never rewritten by import (spec §5).
-  if (bodyChanged && local.origin === 'mint') return 'conflict';
-  return 'update';
+  return loomChanged ? 'conflict' : 'update';
 }
 
 /* The local record a String record was sent from, if it has not been linked yet. */
@@ -78,8 +91,21 @@ export async function runImport({ store, registry, client, now = () => Date.now(
   // Strands last, so every item they point at is already held.
   const ordered = [...plan].sort((a, b) => (a.rec.type === STRAND) - (b.rec.type === STRAND));
   for (const { action, rec, local } of ordered) {
-    if (action === 'unchanged') { counts.unchanged += 1; continue; }
-    if (action === 'conflict') { conflict(local.key); continue; }
+    if (action === 'unchanged') {
+      counts.unchanged += 1;
+      // The String can restamp a record without changing it (a publish): keep the version Send will edit against.
+      if (local.stringHlc !== (rec.hlc ?? null) || !local.stringKeys) {
+        const cur = await store.getRecord(local.key);
+        if (cur?.stringId === rec.id && (await decide(rec, cur)) === 'unchanged') await store.putRecord({ ...cur, ...stringFields(rec) });
+      }
+      continue;
+    }
+    if (action === 'conflict') {
+      const cur = await store.getRecord(local.key);
+      if (cur?.stringId === rec.id) await store.putRecord({ ...cur, conflict: { theirs: rec, at: iso(), reason: 'import' } });
+      conflict(local.key);
+      continue;
+    }
     const body = rec.type === STRAND ? toLoomItems(rec.body, keyByStringId) : rec.body;
     const key = local?.key ?? recordKey(rec.type, rec.id);
 
@@ -88,7 +114,7 @@ export async function runImport({ store, registry, client, now = () => Date.now(
       if (!cur || cur.stringId) { counts.unchanged += 1; continue; }   // linked meanwhile (another tab)
       await store.putRecord({ ...cur, stringId: rec.id, sentAt: cur.sentAt ?? iso(),
         stringHash: await contentHash(rec.body), importedHash: await contentHash(body),
-        importedState: rec.state || 'kept' });
+        importedState: rec.state || 'kept', ...stringFields(rec) });
       counts.link += 1;
       onProgress(counts);
       continue;
@@ -101,7 +127,7 @@ export async function runImport({ store, registry, client, now = () => Date.now(
       createdAt: rec.createdAt, updatedAt: iso(), hlc: rec.hlc ?? null, deviceId: 'string',
       day: dayOf(rec.type, body, rec.createdAt), stringId: rec.id,
       stringHash: await contentHash(rec.body), importedHash: await contentHash(body),
-      importedState: rec.state || 'kept',
+      importedState: rec.state || 'kept', ...stringFields(rec),
     };
     if (local?.sentAt) env.sentAt = local.sentAt;
     if (problems.length) env.invalid = problems;
@@ -123,7 +149,11 @@ export async function runImport({ store, registry, client, now = () => Date.now(
     const cur = await store.getRecord(key);
     const again = cur ? (cur.stringId === rec.id ? await decide(rec, cur) : 'conflict') : 'add';
     if (again === 'unchanged') { counts.unchanged += 1; continue; }
-    if (again === 'conflict' || (again === 'add') !== (action === 'add')) { conflict(key); continue; }
+    if (again === 'conflict' || (again === 'add') !== (action === 'add')) {
+      if (cur) await store.putRecord({ ...cur, conflict: { theirs: rec, at: iso(), reason: 'import' } });
+      conflict(key);
+      continue;
+    }
 
     counts[action] += 1;
     if (problems.length) counts.invalid += 1;
