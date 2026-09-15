@@ -1,0 +1,19 @@
+[
+  "com/atproto/repo/strongRef.json",
+  "com/cultureblocs/annotation.json",
+  "com/cultureblocs/bead.json",
+  "com/cultureblocs/creative/connection.json",
+  "com/cultureblocs/creative/profile.json",
+  "com/cultureblocs/creative/work.json",
+  "com/cultureblocs/defs.json",
+  "com/cultureblocs/strand.json",
+  "com/cultureblocs/venue/lineup.json",
+  "com/cultureblocs/venue/listing.json",
+  "com/cultureblocs/venue/profile.json",
+  "community/lexicon/calendar/event.json",
+  "community/lexicon/calendar/rsvp.json",
+  "community/lexicon/location/address.json",
+  "community/lexicon/location/fsq.json",
+  "community/lexicon/location/geo.json",
+  "community/lexicon/location/hthree.json"
+]
