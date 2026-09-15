@@ -79,7 +79,9 @@ export async function mountPanel(root, ctx) {
       try {
         await restoreBackup(ctx.store, doc);
       } catch (err) {
-        s.importResult = `restore failed: ${err.message} — the backup file is unchanged; try again`;
+        // Checked before anything was cleared, so this is a write failing part way (e.g. a full disk):
+        // this browser may now hold only part of the file. The file itself is untouched.
+        s.importResult = `restore failed part way: ${err.message} — this browser may hold only part of the backup; free some space and restore the same file again`;
         await render();
         return;
       }
