@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; connect-src *; worker-src 'self'; manifest-src 'self'">
+  <title>Loom</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon-192.png">
+  <meta name="theme-color" content="#1B1D22">
+  <link rel="stylesheet" href="loom.css">
+</head>
+<body>
+  <header class="bar">
+    <a class="brand" href="#/thread">LOOM</a>
+    <nav>
+      <a href="#/thread" data-nav="thread">thread</a>
+      <a href="#/mint" data-nav="mint">mint</a>
+      <a href="#/string" data-nav="string">string</a>
+    </nav>
+    <span id="banner" class="banner" hidden></span>
+  </header>
+  <main id="panes">
+    <section id="main" class="pane"></section>
+    <aside id="side" class="pane"></aside>
+  </main>
+  <noscript>Loom needs JavaScript: it is the whole app.</noscript>
+  <script type="module" src="loom.js"></script>
+</body>
+</html>

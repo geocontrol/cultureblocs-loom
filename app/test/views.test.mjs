@@ -1,0 +1,153 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { esc, html, raw } from '../ui/html.js';
+import { backupReminder, dayView, monthView } from '../ui/view-thread.js';
+import { mintView, safeColor } from '../ui/view-mint.js';
+import { publishHint, refFromFields, refsView } from '../ui/view-refs.js';
+import { bodyFromFields, composeView, parseLinks } from '../ui/view-compose.js';
+import { panelView } from '../ui/view-panel.js';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { APP } from './helpers.mjs';
+
+const B = 'com.cultureblocs.bead', S = 'com.cultureblocs.strand';
+const bead = (key, extra = {}) => ({ key, type: B, rkey: key, sourceApp: 'loom', state: 'kept', createdAt: '2026-09-14T21:04:00Z',
+  day: '2026-09-14', body: { $type: B, createdAt: '2026-09-14T21:04:00Z', kind: 'visit', note: 'a <b>note</b>' }, ...extra });
+
+test('html escapes values but not nested html or raw()', () => {
+  assert.equal(String(html`<p>${'<script>'}</p>`), '<p>&lt;script&gt;</p>');
+  assert.equal(String(html`<p>${html`<b>${'&'}</b>`}${raw('<i>')}</p>`), '<p><b>&amp;</b><i></p>');
+  assert.equal(esc(`"'`), '&quot;&#39;');
+});
+
+test('monthView lists the month and marks unsent days', () => {
+  const out = String(monthView([{ day: '2026-09-14', count: 3, unsent: 1 }, { day: '2026-08-18', count: 222, unsent: 0 }],
+    { month: '2026-09', today: '2026-09-14' }));
+  assert.match(out, /href="#\/thread\/2026-09-14">2026-09-14 · today/);
+  assert.match(out, /1 unsent/);
+  assert.doesNotMatch(out, /222/);
+});
+
+test('dayView renders strands with members, proposals with keep/release, and escapes notes', () => {
+  const p = bead(`${B}/p`, { state: 'proposal', sourceApp: 'scrobbler' });
+  const s = { key: `${S}/s`, type: S, state: 'draft', sourceApp: 'loom', createdAt: '2026-09-14T22:00:00Z',
+    body: { title: 'Sunday', narrative: 'It rained.', items: [] } };
+  const out = String(dayView([{ kind: 'strand', record: s, members: [bead(`${B}/a`)] }, { kind: 'item', record: p }], { day: '2026-09-14' }));
+  assert.match(out, /<a href="#\/thread\/2026-09">2026-09<\/a> \/ 2026-09-14/);
+  assert.match(out, /Sunday/);
+  assert.match(out, /draft/);
+  assert.match(out, /a &lt;b&gt;note&lt;\/b&gt;/);
+  assert.match(out, /data-action="keep"/);
+  assert.match(out, /tell this/);
+  assert.match(out, /has-machine/);
+});
+
+test('backup reminder appears only when unsent work is at risk', () => {
+  const now = Date.parse('2026-09-15T00:00:00Z');
+  assert.equal(backupReminder({ unsent: 0, lastBackupAt: null, now }), null);
+  assert.equal(backupReminder({ unsent: 3, lastBackupAt: '2026-09-14T00:00:00Z', now }), null);
+  assert.match(backupReminder({ unsent: 3, lastBackupAt: null, now }), /never backed up/);
+  assert.match(backupReminder({ unsent: 25, lastBackupAt: '2026-09-14T00:00:00Z', now }), /25 records/);
+  assert.match(backupReminder({ unsent: 1, lastBackupAt: '2026-09-01T00:00:00Z', now }), /14 days ago/);
+});
+
+test('mintView shows the chosen mask and the last mint', () => {
+  const out = String(mintView({ mask: 'ART', last: bead(`${B}/x`) }));
+  assert.match(out, /aria-checked="true" data-action="mask" data-mask="ART"/);
+  assert.match(out, /minted visit at 21:04/);
+});
+
+test('publishHint explains what the strip would withhold', () => {
+  assert.match(publishHint({ type: 'person', role: 'mention', descriptor: { label: 'J' } }), /stays local/);
+  assert.match(publishHint({ type: 'work', role: 'subject', descriptor: { label: 'Dog Days', creator: 'Jane' } }), /creator stays local/);
+  assert.match(publishHint({ type: 'person', role: 'mention', descriptor: { label: 'Ballard' },
+    externalIds: [{ scheme: 'wikidata', id: 'Q190379' }, { scheme: 'email', id: 'x@y' }] }), /1 id stays local/);
+  assert.equal(publishHint({ type: 'work', role: 'subject', descriptor: { label: 'Crash' }, externalIds: [{ scheme: 'isbn', id: '1' }] }), 'publishes as shown');
+});
+
+test('refFromFields reads a row, parses ids, keeps the anchor', () => {
+  const ref = refFromFields({ type: ' person ', role: 'mention', label: 'Ursula K. Le Guin', creator: '', date: '',
+    did: '', externalIds: 'viaf: 96999624\nnot-an-id\nwikidata:Q181659' }, { index: { byteStart: 0, byteEnd: 6 } });
+  assert.deepEqual(ref, { type: 'person', role: 'mention', descriptor: { label: 'Ursula K. Le Guin' },
+    externalIds: [{ scheme: 'viaf', id: '96999624' }, { scheme: 'wikidata', id: 'Q181659' }], index: { byteStart: 0, byteEnd: 6 } });
+  assert.match(String(refsView([ref], 'Ursula wrote')), /anchored to “Ursula”/);
+});
+
+test('compose round-trips a strand and a bead through its fields', () => {
+  assert.deepEqual(parseLinks('https://a.test | A | B\n\nhttps://b.test'), [{ uri: 'https://a.test', title: 'A | B' }, { uri: 'https://b.test' }]);
+  const strand = bodyFromFields(S, { $type: S, createdAt: 'x', items: [] },
+    { title: ' Sunday ', day: '2026-09-14', text: 'It rained.', place: 'Peckham', links: '' });
+  assert.deepEqual(strand, { $type: S, createdAt: 'x', items: [], title: 'Sunday', day: '2026-09-14T00:00:00Z', narrative: 'It rained.', place: { name: 'Peckham' } });
+  const b = bodyFromFields(B, { $type: B, kind: 'bloc', media: [{ uri: '/media/x.jpg', alt: 'old' }], subject: { uri: 'at://x' } },
+    { kind: 'read', text: '', place: '', links: '', 'alt-0': 'new alt' });
+  assert.deepEqual(b, { $type: B, kind: 'read', media: [{ uri: '/media/x.jpg', alt: 'new alt' }], subject: { uri: 'at://x' } });
+  const out = String(composeView({ record: { type: S, state: 'draft', day: '2026-09-14', origin: 'compose' }, body: strand,
+    problems: ['$.x: bad'], dayBeads: [bead(`${B}/a`)] }));
+  assert.match(out, /save as told/);
+  assert.match(out, /disabled/);
+  assert.match(out, /\$\.x: bad/);
+  assert.match(out, /include<\/button>/);
+});
+
+test('panelView shows counts and disables send when nothing is sendable', () => {
+  const out = String(panelView({ unsent: 1, sendable: 0, drafts: 2, localChanges: 2, persisted: false }));
+  assert.match(out, /2 drafts not sent/);
+  assert.match(out, /data-action="send" disabled/);
+  assert.match(out, /2 local changes/);
+  assert.match(out, /not marked persistent/);
+});
+
+test('annotations get no edit link in Thread: they are read-only in Phase 1', () => {
+  const A = 'com.cultureblocs.annotation';
+  const ann = { key: `${A}/u1`, type: A, state: 'kept', sourceApp: 'ar', createdAt: '2026-09-14T10:00:00Z', day: '2026-09-14',
+    body: { $type: A, note: 'seen through the glass' } };
+  const out = String(dayView([{ kind: 'item', record: ann }, { kind: 'item', record: bead(`${B}/b`) }], { day: '2026-09-14' }));
+  assert.doesNotMatch(out, new RegExp(`href="#/compose/${A}/u1"`));
+  assert.match(out, new RegExp(`href="#/compose/${B}/b"`));
+});
+
+test('an imported kind cannot inject CSS: an unknown kind renders as bloc', () => {
+  const evil = bead(`${B}/e`, { body: { $type: B, createdAt: '2026-09-14T21:04:00Z', kind: 'x);background:url(//evil.test/p' } });
+  const out = String(dayView([{ kind: 'item', record: evil }, { kind: 'item', record: bead(`${B}/v`) }], { day: '2026-09-14' }));
+  assert.match(out, /data-kind="bloc"/);
+  assert.match(out, /data-kind="visit"/);
+  assert.doesNotMatch(out, /data-kind="x\)/);
+});
+
+test('views carry no inline styles or inline event handlers (the CSP forbids both)', () => {
+  const s = { key: `${S}/s`, type: S, state: 'kept', sourceApp: 'loom', createdAt: '2026-09-14T22:00:00Z', body: { title: 'T', items: [] } };
+  const outs = [
+    dayView([{ kind: 'strand', record: s, members: [bead(`${B}/a`)] }], { day: '2026-09-14' }),
+    mintView({ mask: 'ART' }),
+    composeView({ record: { type: B, state: 'kept', day: '2026-09-14' }, body: bead('x').body }),
+    panelView({ unsent: 0 }),
+  ].map(String);
+  for (const out of outs) assert.doesNotMatch(out, /\sstyle=|\son[a-z]+=/);
+  assert.equal(safeColor('#D71921'), '#D71921');
+  assert.equal(safeColor('red;background:url(//evil.test)'), null);
+});
+
+test('index.html declares the content security policy', () => {
+  const page = readFileSync(join(APP, 'index.html'), 'utf8');
+  assert.match(page, /<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; connect-src \*; worker-src 'self'; manifest-src 'self'">/);
+});
+
+test('a shape-wrong imported record still renders: tags, media, items, refs and links that are not lists', () => {
+  const odd = bead(`${B}/o`, { body: { $type: B, createdAt: '2026-09-14T21:04:00Z', kind: 'bloc', tags: 'art', media: 'x', refs: 'y', links: 'z' } });
+  const out = String(dayView([{ kind: 'item', record: odd }], { day: '2026-09-14' }));
+  assert.match(out, /bloc/);
+  const strandOdd = { key: `${S}/o`, type: S, state: 'kept', day: '2026-09-14', body: { items: 'nope', refs: {}, links: 'l' } };
+  assert.match(String(composeView({ record: strandOdd, body: strandOdd.body })), /beads in this entry/);
+  assert.match(String(composeView({ record: odd, body: odd.body })), /photos/);
+});
+
+test('refs render when an imported ref carries externalIds that are not a list', () => {
+  assert.doesNotThrow(() => String(refsView([{ type: 'work', role: 'subject', descriptor: { label: 'X' }, externalIds: 'wikidata:Q1' }], 'X')));
+  assert.doesNotThrow(() => String(refsView([{ type: 'work', role: 'subject', descriptor: { label: 'X' }, externalIds: [null, 7] }], 'X')));
+});
+
+test('restore cannot be confirmed while an import or send is running', () => {
+  const s = { pendingRestore: { fileName: 'b.json', records: 1, unsent: 0, incoming: 1 }, sendResults: [] };
+  assert.doesNotMatch(String(panelView({ ...s, busy: false })), /data-action="restore-confirm" disabled/);
+  assert.match(String(panelView({ ...s, busy: true })), /data-action="restore-confirm" disabled/);
+});

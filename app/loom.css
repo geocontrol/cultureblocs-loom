@@ -1,0 +1,88 @@
+:root{
+  --ink:#1B1D22; --faint:#8A857C; --line:#DDD6CA; --paper:#F7F4EE; --card:#FFFDF9; --card-edge:#E6DFD3;
+  --visit:#2B4BC7; --dwell:#C7860F; --encounter:#B0326E; --screening:#6B3FA0; --performance:#A23B2A;
+  --bloc:#4A4741; --read:#2E7A4F; --listen:#C74E2B; --watch:#0F6E6B; --note:#4A4741; --annotation:#1B1D22;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --serif: Charter, "Iowan Old Style", Georgia, serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 var(--serif)}
+a{color:var(--visit)}
+button{font:13px var(--mono);background:var(--card);border:1px solid var(--card-edge);border-radius:4px;padding:.25rem .6rem;cursor:pointer}
+button.primary{background:var(--visit);border-color:var(--visit);color:#fff}
+button:disabled{opacity:.45;cursor:not-allowed}
+input,select,textarea{font:inherit;border:1px solid var(--line);border-radius:4px;padding:.3rem .45rem;background:var(--card);width:100%}
+label{display:block;margin:.5rem 0;font:12px var(--mono);color:var(--faint)}
+label > input,label > select,label > textarea{margin-top:.2rem;color:var(--ink);font:15px/1.5 var(--serif)}
+.bar{display:flex;gap:1.2rem;align-items:center;padding:.7rem 1.2rem;border-bottom:1px solid var(--line)}
+.brand{font:700 14px var(--mono);letter-spacing:.2em;color:var(--ink);text-decoration:none}
+.bar nav a{font:13px var(--mono);margin-right:.8rem;text-decoration:none;color:var(--faint)}
+.bar nav a.on{color:var(--ink);border-bottom:2px solid var(--ink)}
+.banner{font:12px var(--mono);color:var(--encounter)}
+#panes{display:grid;grid-template-columns:1fr;gap:0}
+.pane{padding:1rem 1.2rem;min-width:0}
+#side:empty{display:none}
+body[data-posture="desk"] #panes:has(#side:not(:empty)){grid-template-columns:minmax(0,1fr) minmax(0,1.1fr)}
+body[data-posture="desk"] #side{border-left:1px solid var(--line)}
+.chip{font:11px var(--mono);border:1px solid var(--card-edge);border-radius:10px;padding:.05rem .5rem;color:var(--faint);background:var(--card);margin-right:.3rem}
+.chip.unsent{color:var(--dwell);border-color:var(--dwell)}
+.chip.invalid,.chip.missing{color:var(--encounter);border-color:var(--encounter)}
+.months a{font:12px var(--mono);margin-right:.6rem}
+.months a.on{font-weight:700;color:var(--ink)}
+.days{list-style:none;padding:0}
+.days li{padding:.3rem 0;border-bottom:1px dotted var(--line)}
+.days .count{font:12px var(--mono);color:var(--faint);margin:0 .5rem}
+.empty{color:var(--faint)}
+.reminder{font:13px var(--mono);color:var(--dwell);border:1px solid var(--dwell);padding:.4rem .6rem;border-radius:4px}
+.string,.strand>ol{list-style:none;padding-left:1.4rem;border-left:2px solid var(--ink);margin-left:.5rem}
+.string.has-machine{box-shadow:inset 6px 0 0 -4px transparent}
+.stop{position:relative;padding:.3rem 0 .9rem .6rem;--k:var(--bloc)}
+.stop[data-kind="visit"]{--k:var(--visit)}.stop[data-kind="dwell"]{--k:var(--dwell)}.stop[data-kind="encounter"]{--k:var(--encounter)}
+.stop[data-kind="read"]{--k:var(--read)}.stop[data-kind="listen"]{--k:var(--listen)}.stop[data-kind="watch"]{--k:var(--watch)}
+.stop[data-kind="screening"]{--k:var(--screening)}.stop[data-kind="performance"]{--k:var(--performance)}
+.stop[data-kind="note"]{--k:var(--note)}.stop[data-kind="annotation"]{--k:var(--annotation)}
+.error{color:var(--performance);border:1px solid var(--performance);padding:.4rem .6rem;border-radius:4px}
+.stop time{font:12px var(--mono);color:var(--faint);margin-right:.4rem}
+.stop .bead{position:absolute;left:-1.95rem;top:.55rem;width:12px;height:12px;border-radius:50%;background:var(--k,#999)}
+.stop.machine .bead{background:var(--paper);border:2.5px dotted var(--k,#999)}
+.stop .kind{display:inline;font:12px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--k)}
+.stop.machine .kind::after{content:" · auto";color:var(--faint);text-transform:none;letter-spacing:0}
+.stop .title{font-weight:700}
+.stop .meta{font:11px var(--mono);color:var(--faint)}
+.stop .note{margin:.2rem 0;white-space:pre-wrap}
+.tools{font:12px var(--mono);display:flex;gap:.6rem;align-items:center}
+.thumbs{display:flex;gap:.4rem;flex-wrap:wrap;margin:.3rem 0}
+.thumbs img{height:96px;border-radius:3px}
+.strand{margin:.6rem 0 1rem;padding:.6rem .8rem;background:var(--card);border:1px solid var(--card-edge);border-radius:6px}
+.strand header a{font-weight:700;color:var(--ink)}
+.strand .narrative{white-space:pre-wrap}
+.mint{display:grid;justify-items:center;gap:.8rem;padding-top:6vh}
+.masks{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:center}
+.masks button{border-radius:999px;border-color:var(--mask);color:var(--ink)}
+.masks button.on{background:var(--mask);color:var(--ink);box-shadow:inset 0 0 0 2px var(--ink);font-weight:700}
+.mint .line,.mint .kindpick{width:min(24rem,90vw)}
+.press{width:9rem;height:9rem;border-radius:50%;background:var(--ink);border:0;position:relative}
+.press span{position:absolute;inset:25%;border-radius:50%;background:var(--paper);opacity:.15}
+.press.bloom{animation:bloom .9s ease-out}
+@keyframes bloom{0%{box-shadow:0 0 0 0 rgba(27,29,34,.5)}100%{box-shadow:0 0 0 3rem rgba(27,29,34,0)}}
+@media (prefers-reduced-motion: reduce){.press.bloom{animation:none;outline:3px solid var(--visit)}}
+.compose header{display:flex;gap:.6rem;align-items:baseline}
+.compose h2{font-size:1.1rem;margin:.2rem 0}
+.compose fieldset{border:1px solid var(--line);border-radius:6px;margin:.8rem 0;padding:.5rem .8rem}
+.compose legend{font:12px var(--mono);color:var(--faint)}
+.compose footer{display:flex;gap:.6rem;align-items:center;margin:1rem 0}
+.compose .candidates{font-size:14px;color:var(--faint)}
+.compose figure{margin:0;width:10rem}
+.compose figure img{width:100%;border-radius:3px}
+.ref{background:var(--paper)}
+.ref .row{display:flex;gap:.6rem;flex-wrap:wrap}
+.ref .row label{flex:1 1 9rem}
+.ref .hint{font:12px var(--mono);color:var(--faint);margin:.2rem 0}
+.problems{color:var(--encounter);font:13px var(--mono)}
+.conflict{border:1px solid var(--encounter);padding:.5rem;border-radius:4px}
+.panel{max-width:40rem}
+.panel .row{display:flex;gap:.6rem;align-items:center}
+.status,.result{font:12px var(--mono);color:var(--faint)}
+body[data-posture="totem"] .posture-link{display:block}
+.posture-link{display:none;font:12px var(--mono)}
+.dayhead{font:13px var(--mono);color:var(--faint);margin:.2rem 0 1rem}

@@ -1,0 +1,13 @@
+# Loom, served as static files for the desk (Phase 1 is localhost-only).
+#   docker compose up -d        ->  http://localhost:8108
+services:
+  loom:
+    image: nginx:1.27-alpine
+    ports: ["8108:80"]
+    volumes:
+      - ./app:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
