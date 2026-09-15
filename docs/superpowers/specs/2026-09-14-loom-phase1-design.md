@@ -1,6 +1,6 @@
 # Loom Phase 1 — local-only app: design
 
-Status: approved 2026-09-14. Corrected 2026-09-15 from the implementation prototype (see §11).
+Status: approved 2026-09-14. Corrected 2026-09-15 from the implementation prototype (see §11) and from the final review (see §12).
 Parent design: [`LOOM.md`](../../../LOOM.md) — §3 (shape), §4 (data model), §9 (referents), §10 Phase 1.
 Code lands in **this repository** under `app/`.
 
@@ -51,10 +51,15 @@ app/
     importer.js     plan (pure) + apply import from the String
     sender.js       plan (pure) + apply send to the String
     backup.js       export / restore one JSON file
-    images.js       resize + content-address photos (ported from easel/lib/image.js)
+    images.js       resize photos (ported from easel/lib/image.js)
+    media.js        content-addressed photo names, as the String names them
+    string-client.js  the String's HTTP API as Loom uses it (every error names the URL)
+    routing.js      pure: route serialisation and posture (the shell's decisions)
+    lexicons.js     LexiconRegistry from app/vendor/lexicons
   ui/
-    thread.js  mint.js  compose.js  refs-editor.js  string-panel.js
-    view-*.js       view-model functions the ui modules render (pure, tested)
+    thread.js  mint.js  compose.js  string-panel.js   controllers
+    html.js         escaped html templates; the shared error status line
+    view-*.js       view-model functions the ui modules render (pure, tested; view-refs.js is the refs editor)
   vendor/
     lexicon.js  strip.js  refs.js    copied from cultureblocs-string sdk/js
     lexicons/                        copied from cultureblocs-string lexicons
@@ -75,7 +80,8 @@ implementation; that is what lets node test them.
   `createdAt`, or `body.day` for strands) and on `stringId`.
 - **`blobs`**, keyPath `hash` (SHA-256 hex), value `{ hash, mime, blob }`.
 - **`meta`**, keyPath `k`: `deviceId`, `hlc`, `stringUrl`, `stringToken`,
-  `lastImportAt`, `lastBackupAt`, `posture`, `masks`.
+  `lastImportAt`, `lastBackupAt`, `posture`, `masks`, `mask` (the last mask
+  pressed), and `draft:<key>` = `{ body, at, baseUpdatedAt }` for unsaved edits.
 
 ### Envelope
 
@@ -84,8 +90,9 @@ key         "<nsid>/<rkey>"                     e.g. com.cultureblocs.bead/3lqk2
 type        nsid
 rkey        TID for Loom-made records; the String's id for imported ones
 body        the lexicon record body (always valid against app/vendor/lexicons)
-state       proposal | kept | draft | published | edited
-            (Loom sets only the first three; the last two come from imported records until Phase 4)
+state       proposal | kept | draft | released | published | edited
+            (Loom sets proposal→kept, draft→kept and proposal→released; released is local only,
+            a tombstone awaiting Phase 2 sync; the last two come from imported records until Phase 4)
 origin      mint | compose | import
 sourceApp   "loom" for Loom-made; the String's sourceApp for imported
 createdAt   ISO datetime (the record's own)
@@ -109,11 +116,16 @@ invalid     [ validator problems ]   (imported records that fail Loom's validato
   and refuses to store one with problems. Imported records are the one
   exception: stored even if invalid, with `invalid` set and shown.
 - **Mint facts are immutable.** `origin: "mint"` bodies are never
-  rewritten by import. A person may still edit a bead's note, place,
+  rewritten by import: a String body change to one is planned as a
+  conflict, never an update. A person may still edit a bead's note, place,
   photos and refs in Compose; that is an edit, recorded as one.
-- **Proposals.** `keep` sets `state: kept`; `release` deletes the record
-  and is offered only for `state: proposal`. Editing a proposal keeps it
-  (as on the String since cultureblocs-string PR #1).
+- **Proposals.** `keep` sets `state: kept`; `release` is offered only for
+  `state: proposal`. A proposal only Loom holds is deleted; one the String
+  holds (it has a `stringId`) becomes a `released` tombstone — hidden from
+  Thread, counted as a local change, never re-added by import. Editing a
+  proposal keeps it (as on the String since cultureblocs-string PR #1).
+- **Saving recomputes flags.** A save drops `invalid` (the body passed the
+  gate) and keeps only `missing` names the new body still references.
 - **Strand items** reference local keys as `{ uri: "loom://<nsid>/<rkey>" }`.
   Import rewrites `spine://records/<id>` to the local key of the record
   whose `stringId` is `<id>`; send rewrites back (§7).
@@ -140,9 +152,12 @@ in *desk posture* (Thread centre, Compose beside it). Posture is a setting.
   proposals on the dotted rail with **keep** and **release**; the same kind
   colours and `· auto` marker as `cultureblocs-string/timeline`.
 - Every bead has **tell this** → Compose, new strand wrapping that bead.
-- Chips: **unsent** (Loom-made, not yet accepted by the String), **invalid**
-  (imported record failing the validator), **photo missing**.
-- No inline editing: one editor, in Compose.
+- Chips: **unsent** (Loom-made, finished, not yet accepted by the String),
+  **draft**, **invalid** (imported record failing the validator), **photo missing**.
+- No inline editing: one editor, in Compose. **Annotations are read-only in
+  Phase 1** (the AR app owns them): Thread offers no edit, and
+  `#/compose/<annotation key>` — or any type Compose does not edit, or a
+  released tombstone — shows a read-only notice.
 
 **Mint.** Mask strip (default masks as Pocket's), optional one-line note,
 kind picker (default `bloc`), press. Writes a bead with `origin: "mint"`,
@@ -155,7 +170,11 @@ textarea); items (the day's beads, tick to include, drag or arrows to
 order; proposals shown with keep-and-include); refs (below). Live
 problems list; **Save** (stays a draft) and **save as told** (kept, and so
 sendable) are disabled while any exist. Photos belong to beads: the
-`strand` lexicon has no media field.
+`strand` lexicon has no media field. An entry still in draft that was
+started in Compose offers **discard this draft**, which deletes it (and its
+pending draft) on a second press; every other record offers **discard
+changes**. Opening a record with a pending draft says "restored an unsaved
+draft from <time>".
 
 **Compose — bead.** Note, kind, place, links, photos (pick, resized to a
 2000px edge, content-addressed, with alt text), refs.
@@ -171,29 +190,45 @@ identified") — informational only in Phase 1.
 
 **String panel** (drawer). String URL and token; **Check** calls `/health`
 and shows the lexicon list, so a wrong port is caught before anything else.
-**Import** with counts. **Send** with the unsent list. **Backup** and
-**Restore**. Storage persistence status. Counts of unsent records and the
-time of the last backup.
+**Import** with counts. **Send** with the unsent list, disabled when nothing
+is ready to send. **Backup** and **Restore**. Storage persistence status.
+Counts of unsent records, of drafts not sent (separately), of local changes
+to records already on the String, and the time of the last backup. Failures
+show in one status line (`role="alert"`), in every surface.
 
 ## 7 · Import and send
 
 ### Import (`importer.js`)
 
 1. `GET /health` — must list the `com.cultureblocs.*` lexicons, or stop.
-2. `GET /records?type=<nsid>&limit=2000` for bead, annotation, strand (and
-   any other record type the vendored lexicons define that the String holds).
+2. `GET /days`, then `GET /records?day=<day>&limit=2000` for each day, keeping
+   the record types the vendored lexicons define that the String holds. A day
+   that answers the full 2000 fails the import loudly, naming the URL (some
+   records would be missed); a 200 that is not JSON or not the expected shape
+   is an error naming the URL and what was wrong.
 3. **Plan** (pure) each String record against the local store:
-   - *add* — no local record with that `stringId`;
+   - *add* — no local record with that `stringId`, and not one Loom sent;
+   - *link* — the String record's `dedupeKey` is `loom:<rkey>` and the local
+     `<nsid>/<rkey>` (sourceApp `loom`) has no `stringId` (for example after
+     restoring an older backup): set `stringId`, `sentAt` and the hashes as
+     send would — `importedHash` from the String's body in Loom form, so a
+     differing local body reads as a local change. Never a second copy;
    - *update* — unchanged locally (body still hashes to `importedHash` and
      state equals `importedState`) and the String's body or state differs;
    - *unchanged* — the String's body hashes to `stringHash` and its state
      equals `importedState`;
    - *conflict* — changed on both sides (body or state); left alone and listed.
-     Keeping or releasing an imported proposal in Loom is a local change.
+     Keeping or releasing an imported proposal in Loom is a local change, and
+     a String body change to a mint fact is always a conflict.
 4. **Apply** one record per transaction: rewrite strand items to local keys
-   (after all records are added), store, then fetch each referenced photo
-   not already in `blobs` from `GET /media/<name>`; failures go to `missing`
-   and are retried next import.
+   (after all records are added), fetch each referenced photo not already in
+   `blobs` from `GET /media/<name>` (failures go to `missing`, are retried
+   next import, and still-failing retries are counted), then **re-read the
+   local record and plan it again just before writing** — an edit saved in
+   another tab during the network wait makes it a conflict, never an
+   overwrite. Afterwards, strands unchanged locally whose `spine://` items
+   now resolve (a member arrived later) are rewritten to `loom://`, with
+   `importedHash` moved to match.
 
 ### Send (`sender.js`)
 
@@ -208,8 +243,12 @@ time of the last backup.
    sent; the String stores its default, `kept`. Draft strands are not sent.)
 3. On `created` or `duplicate`, set `stringId` and `sentAt`, and the same
    `stringHash` / `importedHash` / `importedState` an import would, so the
-   next import sees the record as unchanged. On `invalid`, keep the record
-   unsent and show the String's problems.
+   next import sees the record as unchanged — written onto a fresh read of
+   the record, so an edit saved during the post keeps its body and reads as
+   a local change. On `duplicate` the String already held a body (perhaps an
+   older one, if an earlier response was lost): fetch `GET /records/{id}` and
+   take `stringHash` from that body and `importedHash` from it in Loom form.
+   On `invalid`, keep the record unsent and show the String's problems.
 
 Edits to records that already have a `stringId` — including keeping or
 releasing an imported proposal — are not sent in Phase 1; the panel counts
@@ -220,13 +259,22 @@ them as "local changes, sync in Phase 2".
 - **Browser-only data.** Request `navigator.storage.persist()` on first
   run; show a banner if refused. Backup/Restore round-trips everything
   (records, blobs as base64, meta minus the token). The panel shows unsent
-  count and last backup time; after 20 unsent records or 7 days since the
-  last backup, a quiet reminder appears in Thread.
+  count and last backup time; after 20 records that live only in this
+  browser (drafts included) or 7 days since the last backup, a quiet
+  reminder appears in Thread.
+- **Restore** asks first, naming how many records (and how many not yet
+  sent) it replaces, with **download a backup first**. It checks the whole
+  file and decodes every photo before clearing anything, clears the three
+  stores in one transaction, and keeps this browser's `stringToken`,
+  `deviceId` and a clock that only moves forward (put back even if a write
+  fails part way). Afterwards every tab reloads.
 - **Drafts.** Compose autosaves to IndexedDB on every change (debounced
   500 ms): a new strand is a record in `state: draft`; an edit to an
   existing record is kept as a pending body in `meta` under
-  `draft:<key>` until saved or discarded. Nothing unsaved is lost on
-  reload, crash or service-worker update.
+  `draft:<key>` until saved or discarded, with the `updatedAt` it was typed
+  against — saving a restored draft over a record changed since is a
+  Conflict. A save waits for any draft write in flight, so no draft outlives
+  it. Nothing unsaved is lost on reload, crash or service-worker update.
 - **Two tabs.** Save compares the stored `updatedAt` with the one loaded;
   on mismatch the save is refused and both versions are shown to choose
   from. Tabs announce writes over `BroadcastChannel("loom")` and re-render.
@@ -234,9 +282,15 @@ them as "local changes, sync in Phase 2".
   offers Backup.
 - **Network.** Import and send name the URL and the status in every error;
   both are resumable; send is idempotent by dedupe key.
-- **Service worker.** Versioned shell cache; a new version waits until no
-  Compose has unsaved changes, then `skipWaiting` + `clients.claim` +
-  reload.
+- **Service worker.** Versioned shell cache (fetched with `cache: 'reload'`;
+  a test fails if a module is not listed); a new version waits until no
+  Compose has unsaved changes, then `skipWaiting` + `clients.claim`, and each
+  tab reloads only after writing its pending draft and being clean.
+- **Content Security Policy.** `index.html` declares `default-src 'self';
+  img-src 'self' blob: data:; style-src 'self'; script-src 'self';
+  connect-src *; worker-src 'self'; manifest-src 'self'`. Views carry no
+  inline styles or handlers: kind colours come from `data-kind` (a known
+  kind, else `bloc`) and stylesheet rules.
 
 ## 9 · Testing
 
@@ -282,3 +336,16 @@ the real String:
 - **Sent strands are `kept` on the String**, its default; drafts stay home (§7).
 - **The first service-worker install must not reload the page** — only the
   replacement of an existing worker is an update (§8).
+
+## 12 · Corrections from the final review (2026-09-15)
+
+- **Writes after a network wait re-read first** (send, import, photo retry), so
+  a concurrent edit is never undone (§7).
+- **Import links records Loom sent** by `dedupeKey` instead of copying them;
+  **send handles `duplicate`** from the String's stored body (§7).
+- **Import lists day by day**, failing loudly on a full page (§7).
+- **Released proposals are tombstones**; **mint facts** are never updated by
+  import (§5).
+- **Annotations are read-only**; **draft entries can be discarded**; drafts
+  carry `baseUpdatedAt` (§6, §8).
+- **Restore confirms and keeps this browser's identity**; **CSP** (§8).
