@@ -305,3 +305,32 @@ test('a server that is not a String is refused before anything is read', async (
   await assert.rejects(runImport({ store, registry: await registry(), client }), /does not look like a String/);
   assert.deepEqual(await store.allRecords(), []);
 });
+
+test('import carries the String’s published link, so the desk knows what is public', async () => {
+  const s = fakeString({ records: [
+    bead('u1', 'public', { publishedUri: 'at://did:plc:x/com.cultureblocs.bead/b1', publishedHash: 'ph1' }),
+    bead('u2', 'private'),
+  ] });
+  const store = createMemStore();
+  await runImport({ store, registry: await registry(), client: s.client });
+
+  const pub = await store.getRecord(`${B}/u1`);
+  assert.equal(pub.publishedUri, 'at://did:plc:x/com.cultureblocs.bead/b1');
+  assert.equal(pub.publishedHash, 'ph1');
+  assert.equal((await store.getRecord(`${B}/u2`)).publishedUri, null,
+    'a record the String has not published reads as not published, not as unknown');
+});
+
+test('a record unpublished on the String stops reading as published here', async () => {
+  const s = fakeString({ records: [bead('u1', 'public', { publishedUri: 'at://did:plc:x/com.cultureblocs.bead/b1' })] });
+  const store = createMemStore();
+  const reg = await registry();
+  await runImport({ store, registry: reg, client: s.client });
+  assert.ok((await store.getRecord(`${B}/u1`)).publishedUri);
+
+  s.records[0].publishedUri = null;
+  s.records[0].hlc = '0000000000099-00000-fake';      // restamped, body unchanged
+  await runImport({ store, registry: reg, client: s.client });
+
+  assert.equal((await store.getRecord(`${B}/u1`)).publishedUri, null);
+});

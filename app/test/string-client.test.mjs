@@ -92,3 +92,60 @@ test('setState posts the state; deleteRecord sends If-Match only when given a ve
     [['POST', '/records/u1/state', null], ['DELETE', '/records/u1', 'h2'], ['DELETE', '/records/u1', null]]);
   assert.deepEqual(JSON.parse(f.seen[0].body), { state: 'kept' });
 });
+
+/* Publishing. The String holds the identity (handle + app password), so Loom
+ * sends only its name and never sees a credential. */
+
+test('listIdentities returns the identities the String holds', async () => {
+  const f = scriptedFetch(() => [200, { identities: [
+    { name: 'personal', handle: 'someone.example', pds: 'https://bsky.social' }] }]);
+  const c = stringClient('http://string.test', 't', f.impl);
+  assert.deepEqual(await c.listIdentities(),
+    [{ name: 'personal', handle: 'someone.example', pds: 'https://bsky.social' }]);
+  assert.deepEqual(f.seen.map((r) => [r.method, r.path]), [['GET', '/identities']]);
+});
+
+test('listIdentities is empty when the String holds none, and fails on a shape it does not recognise', async () => {
+  const none = stringClient('http://string.test', '', scriptedFetch(() => [200, { identities: [] }]).impl);
+  assert.deepEqual(await none.listIdentities(), []);
+  const wrong = stringClient('http://string.test', '', scriptedFetch(() => [200, { names: ['personal'] }]).impl);
+  await assert.rejects(wrong.listIdentities(), (e) => e instanceof StringError && /identities/.test(e.message));
+});
+
+test('publish posts the identity name and returns what went public', async () => {
+  const answer = { identity: 'personal', handle: 'someone.example', did: 'did:plc:x',
+    records: ['at://did:plc:x/com.cultureblocs.bead/b1', 'at://did:plc:x/com.cultureblocs.strand/s1'],
+    strandUri: 'at://did:plc:x/com.cultureblocs.strand/s1' };
+  const f = scriptedFetch(() => [200, answer]);
+  const c = stringClient('http://string.test', 't', f.impl);
+  assert.deepEqual(await c.publish('sid-1', 'personal'), answer);
+  const [req] = f.seen;
+  assert.equal(req.method, 'POST');
+  assert.equal(req.path, '/publish/sid-1');
+  assert.equal(req.headers.Authorization, 'Bearer t');
+  assert.deepEqual(JSON.parse(req.body), { identity: 'personal' });
+});
+
+test('unpublish posts to its own path and reports how many records were removed', async () => {
+  const f = scriptedFetch(() => [200, { removed: 2 }]);
+  const c = stringClient('http://string.test', '', f.impl);
+  assert.equal(await c.unpublish('sid-1', 'personal'), 2);
+  assert.deepEqual(f.seen.map((r) => [r.method, r.path]), [['POST', '/unpublish/sid-1']]);
+  assert.deepEqual(JSON.parse(f.seen[0].body), { identity: 'personal' });
+});
+
+test('publish keeps the String’s refusal: an unknown identity, an unpublishable type, a PDS failure', async () => {
+  const unknown = stringClient('http://string.test', '', scriptedFetch(() => [404, { detail: 'unknown identity' }]).impl);
+  await assert.rejects(unknown.publish('sid-1', 'ghost'), (e) => e.status === 404 && e.detail === 'unknown identity');
+  const lone = stringClient('http://string.test', '', scriptedFetch(() => [400,
+    { detail: 'com.cultureblocs.bead is not publishable on its own; beads and annotations publish as part of a strand' }]).impl);
+  await assert.rejects(lone.publish('sid-2', 'personal'), (e) => e.status === 400 && /part of a strand/.test(e.detail));
+  const pds = stringClient('http://string.test', '', scriptedFetch(() => [502, { detail: 'publish failed: 401' }]).impl);
+  await assert.rejects(pds.publish('sid-3', 'personal'), (e) => e.status === 502 && /publish failed/.test(e.detail));
+});
+
+test('an id with a slash or a space is escaped into the publish path', async () => {
+  const f = scriptedFetch(() => [200, { records: [] }]);
+  await stringClient('http://string.test', '', f.impl).publish('a b/c', 'personal');
+  assert.equal(f.seen[0].path, '/publish/a%20b%2Fc');
+});

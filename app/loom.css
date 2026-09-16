@@ -108,3 +108,9 @@ pre{margin:0;white-space:pre-wrap;font:12px var(--mono)}
 .panel{max-width:40rem}
 .panel .row{align-items:center}
 .status,.result{font:12px var(--mono);color:var(--faint)}
+.publish{max-width:40rem;border:1px solid var(--line);border-radius:6px;margin:1rem 0;padding:.5rem .8rem .8rem}
+.publish h3{font:12px var(--mono);color:var(--faint);font-weight:400;margin:.2rem 0 .5rem;text-transform:lowercase}
+.publish .row{align-items:center;margin:.6rem 0}
+.publish .chip-line{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:.2rem 0}
+.publish .chip.published{color:var(--visit);border-color:var(--visit)}
+.publish .uri{font:11px var(--mono);color:var(--faint);word-break:break-all}

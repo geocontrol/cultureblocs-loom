@@ -34,11 +34,16 @@ export class Conflict extends Error {
   }
 }
 
-/* Why a record cannot be deleted in Loom, or null if it can. */
+/* Why a record cannot be deleted in Loom, or null if it can.
+ *
+ * `publishedUri` is the signal that matters: publishing stamps that column on
+ * the String and deliberately leaves `state` alone, so a published record
+ * still reads `kept`. The state check stays for records whose state was set
+ * by an app that does keep its own published state (easel does). */
 export function whyNotDeletable(r) {
   if (!r) return 'there is no such record';
   if (!EDITABLE.includes(r.type)) return 'records of this type are read-only in Loom';
-  if (PUBLISHED.includes(r.state)) return 'it is published: unpublish it first';
+  if (r.publishedUri || PUBLISHED.includes(r.state)) return 'it is published: unpublish it first';
   return null;
 }
 

@@ -220,3 +220,18 @@ test('saving recomputes the flags import and send set: invalid and problems go, 
   assert.deepEqual(saved.missing, [kept.slice(7)]);
   assert.equal('missing' in await l.save(b.key, { ...b.body }), false);
 });
+
+test('a record the String has published cannot be deleted, whatever its state says', async () => {
+  // Publishing does not move `state`: the String stamps `published_uri` and
+  // leaves the state alone, so a strand published from the timeline or from
+  // the desk still reads `kept`. The public URI is the signal that matters.
+  const { store, loom: l } = await loom();
+  const s = await strand(l, []);
+  await store.putRecord({ ...s, state: 'kept', stringId: 'p1',
+    publishedUri: 'at://did:plc:x/com.cultureblocs.strand/s1' });
+
+  await assert.rejects(l.remove(s.key), /unpublish it first/);
+  assert.match(whyNotDeletable({ type: STRAND, state: 'kept', publishedUri: 'at://x/y/z' }), /unpublish it first/);
+  assert.equal(whyNotDeletable({ type: STRAND, state: 'kept', publishedUri: null }), null,
+    'a record the String says is not published deletes as normal');
+});
