@@ -499,3 +499,128 @@ test('import from settings marks conflicts and says to open them', async () => {
   assert.match(root.innerHTML, /1 changed on both sides: open them to choose/);
   assert.ok((await ctx.store.getRecord(local.key)).conflict);
 });
+
+/* Publishing from the editor. `ctx.publisher` is the seam: the desk asks for a
+ * publisher and does not know whether it talks to the String or, one day, to
+ * a PDS over Loom's own OAuth session. */
+
+function fakePublisher({ store, identities = [{ name: 'personal', handle: 'someone.example' }],
+  fail = null, failIdentities = null } = {}) {
+  const done = [];
+  // Stamps `publishedUri` as lib/publisher.js does, so the editor's re-read
+  // afterwards sees what the real publisher would have left.
+  const stamp = async (key, uri) => store.putRecord({ ...(await store.getRecord(key)), publishedUri: uri });
+  return { done, identities,
+    publisher: {
+      async identities() { if (failIdentities) throw new Error(failIdentities); return identities; },
+      async publish(key, identity) {
+        if (fail) throw Object.assign(new Error('HTTP 400'), { status: 400, detail: fail });
+        done.push(`publish ${key} as ${identity}`);
+        const strandUri = 'at://did:plc:x/com.cultureblocs.strand/s1';
+        await stamp(key, strandUri);
+        return { strandUri, records: [strandUri] };
+      },
+      async unpublish(key, identity) {
+        done.push(`unpublish ${key} as ${identity}`);
+        await stamp(key, null);
+        return 1;
+      },
+    } };
+}
+
+/* A strand already sent to the String, and a ctx wired to `p`. */
+async function strandOnString(ctx, p) {
+  const strand = await makeStrand(ctx.loom, { title: 'A day out' });
+  await ctx.store.putRecord({ ...(await ctx.store.getRecord(strand.key)), stringId: 'sid-1' });
+  ctx.publisher = async () => p.publisher;
+  return strand.key;
+}
+
+test('opening a sent strand offers to publish it as the identity the String holds', async () => {
+  const ctx = await context();
+  const p = fakePublisher({ store: ctx.store });
+  const key = await strandOnString(ctx, p);
+  const root = fakeRoot();
+
+  await mountEditor(root, ctx, { key });
+
+  assert.match(root.innerHTML, /data-action="publish"/);
+  assert.match(root.innerHTML, /someone\.example/);
+});
+
+test('publish goes through the publisher and the strand then reads as published', async () => {
+  const ctx = await context();
+  const p = fakePublisher({ store: ctx.store });
+  const key = await strandOnString(ctx, p);
+  const root = fakeRoot();
+  const editor = await mountEditor(root, ctx, { key });
+
+  await root.fire('click', button('publish'));
+
+  assert.deepEqual(p.done, [`publish ${key} as personal`]);
+  assert.match(root.innerHTML, /data-action="unpublish"/);
+  assert.ok(ctx.events.includes('broadcast changed'), 'the other surfaces hear about it');
+  await editor.unmount();
+});
+
+test('unpublish goes through the publisher too', async () => {
+  const ctx = await context();
+  const p = fakePublisher({ store: ctx.store });
+  const key = await strandOnString(ctx, p);
+  await ctx.store.putRecord({ ...(await ctx.store.getRecord(key)), publishedUri: 'at://x/y/z' });
+  const root = fakeRoot();
+  await mountEditor(root, ctx, { key });
+
+  await root.fire('click', button('unpublish'));
+
+  assert.deepEqual(p.done, [`unpublish ${key} as personal`]);
+});
+
+test('a refused publish shows the String’s own reason and leaves the strand unpublished', async () => {
+  const ctx = await context();
+  const p = fakePublisher({ store: ctx.store, fail: 'refusing to publish seeded data: seed:artworld' });
+  const key = await strandOnString(ctx, p);
+  const root = fakeRoot();
+  await mountEditor(root, ctx, { key });
+
+  await root.fire('click', button('publish'));
+
+  assert.match(root.innerHTML, /seeded data/);
+  assert.equal((await ctx.store.getRecord(key)).publishedUri, undefined);
+});
+
+test('a String that cannot be reached does not stop the strand from being edited', async () => {
+  const ctx = await context();
+  const p = fakePublisher({ store: ctx.store, failIdentities: 'unreachable (offline)' });
+  const key = await strandOnString(ctx, p);
+  const root = fakeRoot();
+
+  await mountEditor(root, ctx, { key });
+
+  assert.match(root.innerHTML, /unreachable \(offline\)/);
+  assert.match(root.innerHTML, /data-action="save"/, 'the form is still there');
+});
+
+test('a bead form has no publishing surface, and asks the String nothing', async () => {
+  const ctx = await context();
+  let asked = false;
+  ctx.publisher = async () => { asked = true; return fakePublisher({ store: ctx.store }).publisher; };
+  const bead = await makeBead(ctx.loom);
+  const root = fakeRoot();
+
+  await mountEditor(root, ctx, { key: bead.key });
+
+  assert.ok(!root.innerHTML.includes('class="publish"'));
+  assert.equal(asked, false);
+});
+
+test('with no String configured a strand shows no publishing surface', async () => {
+  const ctx = await context();
+  const strand = await makeStrand(ctx.loom, { title: 'local only' });
+  ctx.publisher = async () => null;
+  const root = fakeRoot();
+
+  await mountEditor(root, ctx, { key: strand.key });
+
+  assert.ok(!root.innerHTML.includes('class="publish"'));
+});

@@ -5,10 +5,13 @@
 import { mediaName, sha256Hex } from '../lib/media.js';
 import { StringError } from '../lib/string-client.js';
 
-export function fakeString({ records = [], media = {}, failMedia = new Set(), reject = {} } = {}) {
+export function fakeString({ records = [], media = {}, failMedia = new Set(), reject = {},
+  identities = [{ name: 'personal', handle: 'someone.example', pds: 'https://bsky.social' }] } = {}) {
   let n = 0, clock = 0;
   const posted = [];
   const calls = [];
+  const published = [];
+  const unpublished = [];
   const stamp = () => `${String(++clock).padStart(13, '0')}-00000-fake`;
   const dayOf = (r) => String(r.createdAt).slice(0, 10);
   const fail = (path, status, detail = null) => new StringError(`http://string.test${path}`, `HTTP ${status}`, { status, detail });
@@ -91,6 +94,36 @@ export function fakeString({ records = [], media = {}, failMedia = new Set(), re
       stale(rec, hlc, path);
       records.splice(records.indexOf(rec), 1);
     },
+    async listIdentities() {
+      reach('/identities');
+      calls.push('listIdentities');
+      return structuredClone(identities);
+    },
+    /* The String publishes to the PDS and stamps `publishedUri` on the record. */
+    async publish(id, identity) {
+      const path = `/publish/${id}`;
+      reach(path);
+      calls.push(`publish ${id} ${identity}`);
+      const rec = find(id, path);
+      if (!identities.some((i) => i.name === identity)) throw fail(path, 404, 'unknown identity');
+      if (out.failPublish) throw fail(path, 400, out.failPublish);
+      published.push({ id, identity });
+      const uri = `at://did:plc:fake/${rec.type}/${id}`;
+      rec.publishedUri = uri;
+      const key = rec.type.endsWith('strand') ? 'strandUri' : 'uri';
+      return { identity, handle: 'someone.example', did: 'did:plc:fake', records: [uri], [key]: uri };
+    },
+    async unpublish(id, identity) {
+      const path = `/unpublish/${id}`;
+      reach(path);
+      calls.push(`unpublish ${id} ${identity}`);
+      const rec = find(id, path);
+      if (out.failUnpublish) throw fail(path, 502, out.failUnpublish);
+      unpublished.push({ id, identity });
+      const had = Boolean(rec.publishedUri);
+      rec.publishedUri = null;
+      return had ? 1 : 0;
+    },
     async postMedia(blob) {
       reach('/media');
       const name = mediaName(await sha256Hex(new Uint8Array(await blob.arrayBuffer())), blob.type);
@@ -108,7 +141,10 @@ export function fakeString({ records = [], media = {}, failMedia = new Set(), re
     return structuredClone(rec);
   }
 
-  return { client, records, media, posted, calls, editOnString, state };
+  /* `failPublish` / `failUnpublish` are set by a test to make the String refuse. */
+  const out = { client, records, media, posted, calls, published, unpublished, identities,
+    editOnString, state, failPublish: null, failUnpublish: null };
+  return out;
 }
 
 export const photo = (text = 'jpeg-bytes', type = 'image/jpeg') => new Blob([text], { type });

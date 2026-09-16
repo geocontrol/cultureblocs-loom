@@ -20,6 +20,7 @@ import { mediaNames, putPhoto } from '../lib/media.js';
 import { beadFormView } from './view-bead.js';
 import { bodyFromFields, fromLocalInput, problemsView, readOnlyView } from './view-form.js';
 import { conflictView, deleteView, deletedView } from './view-panels.js';
+import { publishView } from './view-publish.js';
 import { publishHint, refFromFields } from './view-refs.js';
 import { strandFormView } from './view-strand.js';
 import { errorLine, html, surfaceErrors } from './html.js';
@@ -59,6 +60,29 @@ export async function mountEditor(root, ctx, { key, day = '', isNew = false }) {
 
   const text = () => state.body[textField(type)] || '';
 
+  /* Publishing, asked for once when a strand opens: `available` is false when
+   * no String is configured, and the surface then stays hidden entirely. */
+  const publish = { identities: [], error: '', busy: false, available: false };
+
+  async function loadPublishing() {
+    if (type !== STRAND || !ctx.publisher) return;
+    const publisher = await ctx.publisher();
+    if (!publisher) return;
+    publish.available = true;
+    try {
+      publish.identities = await publisher.identities();
+    } catch (err) {
+      publish.error = err?.message || String(err);
+    }
+  }
+
+  /* The String puts its refusal in `detail`; the message is only the status. */
+  const reason = (err) => {
+    const d = err?.detail;
+    if (!d) return err?.message || String(err);
+    return typeof d === 'string' ? d : JSON.stringify(d);
+  };
+
   /* What Save would write, for validation before there is a record. */
   function candidate() {
     if (record) return state.body;
@@ -96,7 +120,10 @@ export async function mountEditor(root, ctx, { key, day = '', isNew = false }) {
     // Deleted here and changed on the String: only the conflict's choices apply (save would be refused).
     const form = view({ ...state, record, problems: problems(), locked: Boolean(record?.deleted) });
     const confirm = state.confirmDelete ? deleteView({ record, ...state.confirmDelete }) : '';
-    root.innerHTML = String(html`${status}<p class="back"><a href="#/day/${record?.day || ''}">back</a></p>${conflict}${form}${confirm}`);
+    const publishing = publish.available && !record?.deleted
+      ? publishView({ record, identities: publish.identities, busy: publish.busy, error: publish.error })
+      : '';
+    root.innerHTML = String(html`${status}<p class="back"><a href="#/day/${record?.day || ''}">back</a></p>${conflict}${form}${publishing}${confirm}`);
   }
 
   function refreshInPlace() {
@@ -250,6 +277,29 @@ export async function mountEditor(root, ctx, { key, day = '', isNew = false }) {
   };
   if (type === STRAND && ctx.desk) ctx.desk.tick = tick;
 
+  /* Publish or unpublish this strand, as the chosen identity. The request is
+   * slow, so the surface goes busy first; the record is re-read afterwards
+   * because the publisher stamps the public URI on it. */
+  async function goPublic(action) {
+    const publisher = await ctx.publisher?.();
+    if (!publisher) return;
+    const chosen = root.querySelector?.('select[name="identity"]')?.value
+      || publish.identities[0]?.name;
+    publish.busy = true;
+    await render();
+    try {
+      if (action === 'publish') await publisher.publish(key, chosen);
+      else await publisher.unpublish(key, chosen);
+      record = await ctx.store.getRecord(key);
+      changed();
+    } catch (err) {
+      state.error = reason(err);
+    } finally {
+      publish.busy = false;
+    }
+    await render();
+  }
+
   async function onClick(e) {
     const button = e.target.closest?.('button[data-action]');
     if (!button) return;
@@ -267,6 +317,7 @@ export async function mountEditor(root, ctx, { key, day = '', isNew = false }) {
       return render();
     }
     if (action === 'delete-cancel') { state.confirmDelete = null; return render(); }
+    if (action === 'publish' || action === 'unpublish') return goPublic(action);
     if (action === 'delete-confirm') {
       await settleDrafts();
       await ctx.loom.remove(key);
@@ -336,6 +387,7 @@ export async function mountEditor(root, ctx, { key, day = '', isNew = false }) {
   root.addEventListener('click', click);
   root.addEventListener('change', change);
   root.addEventListener('submit', submit);
+  await loadPublishing();
   await render();
   ctx.desk?.refreshColumn?.();
   return {

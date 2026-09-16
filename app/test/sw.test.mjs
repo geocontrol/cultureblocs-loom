@@ -17,6 +17,6 @@ test('SHELL lists exactly the root shell files and every module under lib, ui an
 });
 
 test('the cache version is bumped and install bypasses the HTTP cache', () => {
-  assert.match(sw, /const VERSION = 'loom-3';/);
+  assert.match(sw, /const VERSION = 'loom-4';/);
   assert.match(sw, /cache: 'reload'/);
 });

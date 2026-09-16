@@ -103,6 +103,30 @@ export function stringClient(baseUrl, token, fetchImpl = globalThis.fetch.bind(g
     async deleteRecord(id, hlc) {
       await call(`/records/${encodeURIComponent(id)}`, { method: 'DELETE', headers: ifMatch(hlc) });
     },
+    /* The identities the String can speak as: [{ name, handle, pds }]. The
+     * handle's app password stays on the String — Loom sends only the name. */
+    async listIdentities() {
+      const body = await json('/identities', (b) => (Array.isArray(b?.identities)
+        && b.identities.every((i) => isObject(i) && typeof i.name === 'string')
+        ? null : 'expected { identities: [{ name, handle, pds }] }'));
+      return body.identities;
+    },
+    /* Publish a strand and the beads it lists, as `identity`. The String does
+     * the strip and talks to the PDS, inline: this is a slow request, and it
+     * is not atomic (see the Publish panel's notes). Re-publishing is how a
+     * half-finished publish is repaired — the rkeys are reused. */
+    async publish(id, identity) {
+      return json(`/publish/${encodeURIComponent(id)}`, (b) => (Array.isArray(b?.records)
+        ? null : 'expected { records: [...] }'),
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identity }) });
+    },
+    /* Withdraw a strand and its beads from the PDS. Returns how many went. */
+    async unpublish(id, identity) {
+      const body = await json(`/unpublish/${encodeURIComponent(id)}`, (b) => (typeof b?.removed === 'number'
+        ? null : 'expected { removed: <count> }'),
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identity }) });
+      return body.removed;
+    },
     async postMedia(blob) {
       return json('/media', (b) => (typeof b?.uri === 'string' ? null : 'expected { uri, mime, bytes }'),
         { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });   // { uri, mime, bytes }

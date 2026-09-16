@@ -19,8 +19,10 @@ import { BEAD, STRAND, openLoom } from './lib/envelope.js';
 import { loadRegistry } from './lib/lexicons.js';
 import { hashFromName } from './lib/media.js';
 import { migrateStore } from './lib/migrate.js';
+import { stringPublisher } from './lib/publisher.js';
 import { phase1Redirect, routeSerializer } from './lib/routing.js';
 import { openStore } from './lib/store.js';
+import { stringClient } from './lib/string-client.js';
 import { mountEditor } from './ui/editor.js';
 import { mountDay, mountSend, mountTopbar } from './ui/pages.js';
 import { mountSettings } from './ui/settings.js';
@@ -56,6 +58,14 @@ async function boot() {
       if (kind !== 'restored') refreshAll();
     },
     reload: reloadWhenClean,
+    /* The publisher, or null when no String is configured. Built per call so
+     * it always uses the address settings hold now. Swapping this for a
+     * client-side OAuth publisher (LOOM.md §8) is the whole change. */
+    async publisher() {
+      const url = await store.getMeta('stringUrl');
+      if (!url) return null;
+      return stringPublisher({ store, client: stringClient(url, await store.getMeta('stringToken'), ctx.fetch) });
+    },
     navigate: (hash) => { location.hash = hash; },
     setDirty: (d) => { dirty = d; },
     async persisted() { return (await navigator.storage?.persisted?.()) ?? false; },

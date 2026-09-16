@@ -29,8 +29,13 @@ const STRAND = 'com.cultureblocs.strand';
 const LOOM_DEDUPE = 'loom:';
 
 /* What Send needs to know about the String's copy of a record. */
+/* What the String holds about a record beyond its body: its version, the
+ * fields and photos it has, and whether it is public. `publishedUri` is
+ * normalised to null rather than left undefined, so "the String says it is
+ * not published" and "we have never asked" do not read the same. */
 export const stringFields = (rec) => ({ stringHlc: rec.hlc ?? null,
-  stringKeys: Object.keys(rec.body || {}), stringMedia: mediaNames(rec.body) });
+  stringKeys: Object.keys(rec.body || {}), stringMedia: mediaNames(rec.body),
+  publishedUri: rec.publishedUri ?? null, publishedHash: rec.publishedHash ?? null });
 
 /* The action for one String record against one local record (held under its stringId). */
 async function decide(rec, local) {
