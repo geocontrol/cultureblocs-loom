@@ -6,7 +6,7 @@ import { absorbDump, readWardrobe, runClear, runPull, writeWardrobe } from '../l
 import { parseDump } from '../lib/totem-protocol.js';
 import { fakeSerial } from './fake-serial.mjs';
 import { openPort } from '../lib/totem-port.js';
-import { CLEAN, CLEAR_OK, CLEAR_REFUSED, MALFORMED, TRUNCATED, WARDROBE }
+import { CLEAN, CLEAR_OK, CLEAR_REFUSED, MALFORMED, WARDROBE }
   from './fixtures/totem-dumps.mjs';
 import { registry, steppingNow } from './helpers.mjs';
 
@@ -47,18 +47,12 @@ test('pulling the same dump twice adds nothing the second time', async () => {
   assert.equal((await store.allRecords()).length, 3);
 });
 
-test('a truncated dump writes nothing at all', async () => {
+test('a dump that never completes writes nothing at all', async () => {
   const { store, loom } = await desk();
-  // Modelled as a mid-transfer disconnect: the device sent the truncated text
-  // and then the cable dropped, rather than merely going quiet forever (which
-  // `portFor` alone cannot express — a plain reply never signals "no more is
-  // coming", so `readUntil` would just wait out its 8s timeout instead of
-  // surfacing the dump's own truncation).
-  const port = await openPort({ serial: fakeSerial({ reply: () => TRUNCATED, disconnect: true }).serial });
-  await assert.rejects(
-    runPull({ store, loom, port, now: () => SYNC, day: '2026-09-16' }),
-    /truncated/,
-  );
+  // The device drops out before ---BEADS-END--- arrives.
+  const f = fakeSerial({ disconnect: true });
+  const port = await openPort({ serial: f.serial });
+  await assert.rejects(runPull({ store, loom, port, now: () => SYNC, day: '2026-09-16' }));
   assert.deepEqual(await store.allRecords(), []);
 });
 

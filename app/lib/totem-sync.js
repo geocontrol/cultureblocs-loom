@@ -50,19 +50,7 @@ export async function absorbDump({ store, loom, dump, syncWallClock, day, device
 export async function runPull({ store, loom, port, now = () => Date.now(), day,
   deviceLabel = '' }) {
   await port.send('D');
-  let text;
-  try {
-    text = await port.readUntil(MARKERS.beadsEnd, { timeoutMs: PULL_TIMEOUT });
-  } catch (err) {
-    // Nothing arrived at all (a sleeping device): the port's own message,
-    // which tells a person to press a button, is more useful than a parse
-    // error over an empty string. Something arrived but was cut off (a
-    // dropped cable mid-transfer): hand it to parseDump so the failure names
-    // the actual defect — a truncated dump — rather than the port's generic
-    // "disconnected" wording.
-    if (!err.partial) throw err;
-    text = err.partial;
-  }
+  const text = await port.readUntil(MARKERS.beadsEnd, { timeoutMs: PULL_TIMEOUT });
   const dump = parseDump(text);                 // throws on a truncated dump
   return absorbDump({ store, loom, dump, syncWallClock: now(), day, deviceLabel });
 }
@@ -72,11 +60,13 @@ export async function runPull({ store, loom, port, now = () => Date.now(), day,
  * pull behind it. */
 export async function runClear({ port, count }) {
   await port.send(`C${count}`);
-  // Both replies OPEN with '---', so a bare '---' marker matches immediately
-  // at position 0 and returns before the payload arrives. '---\n' matches only
-  // the CLOSING dashes, which both replies share right before the newline.
-  const text = await port.readUntil('---\n', { timeoutMs: REPLY_TIMEOUT });
-  return parseClearReply(text);
+  // Both replies open AND close with `---`, so a single read stops on the
+  // opening pair at position 0 and returns before the payload. Two reads:
+  // the first consumes the opening dashes, the second carries through to the
+  // closing pair. Newline-agnostic, unlike reading until `---\n`.
+  const head = await port.readUntil('---', { timeoutMs: REPLY_TIMEOUT });
+  const rest = await port.readUntil('---', { timeoutMs: REPLY_TIMEOUT });
+  return parseClearReply(head + rest);
 }
 
 export async function readWardrobe({ port }) {

@@ -52,16 +52,10 @@ export async function openPort({ serial = globalThis.navigator?.serial, baudRate
         }
         const left = deadline - Date.now();
         if (left <= 0) {
-          const err = new PortError('the totem didn’t answer — wake it with a button press and pull again');
-          err.partial = buffer;   // whatever arrived before the deadline, for a caller that can make sense of it
-          throw err;
+          throw new PortError('the totem didn’t answer — wake it with a button press and pull again');
         }
         const { value, done } = await readChunk(left);
-        if (done) {
-          const err = new PortError('the totem disconnected part way through — nothing was saved');
-          err.partial = buffer;
-          throw err;
-        }
+        if (done) throw new PortError('the totem disconnected part way through — nothing was saved');
         buffer += decoder.decode(value, { stream: true });
       }
     },
