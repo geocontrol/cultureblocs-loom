@@ -75,16 +75,19 @@ export async function openLoom({ store, registry, now = () => Date.now(), newDev
     if (problems.length) throw new InvalidRecord(problems);
   }
 
-  /* `at` is the moment of the save: the record's updatedAt, and the time its body records. */
-  async function create(key, type, body, at, extra = {}) {
+  /* `at` is the moment of the save: the record's updatedAt, and the time its
+   * body records. The options name every field a caller may set — identity and
+   * stamps are this function's alone, so they cannot be passed in. */
+  async function create(key, type, body, at,
+    { state = 'kept', origin = 'loom', sourceApp = 'loom', dedupeKey = null } = {}) {
     check(type, body);
     if (await store.getRecord(key)) throw new Error(`${key} already exists`);
     const env = {
-      key, type, rkey: key.slice(type.length + 1), body, state: 'kept', origin: 'loom', sourceApp: 'loom',
+      key, type, rkey: key.slice(type.length + 1), body, state, origin, sourceApp,
       createdAt: body.createdAt, updatedAt: at, hlc: await stamp(), deviceId,
       day: dayOf(type, body, body.createdAt),
-      ...extra,
     };
+    if (dedupeKey) env.dedupeKey = dedupeKey;
     await store.putRecord(env);
     await store.deleteMeta(`draft:${key}`);
     return env;
@@ -162,9 +165,8 @@ export async function openLoom({ store, registry, now = () => Date.now(), newDev
      * against anything Studio pushed. Validated like any other write: unlike
      * an import, this record is not on the String yet. */
     adoptBead(key, body, { dedupeKey = null, sourceApp = 'culturebloc-totem' } = {}) {
-      const extra = { state: 'proposal', origin: 'connector:totem', sourceApp };
-      if (dedupeKey) extra.dedupeKey = dedupeKey;
-      return create(key, BEAD, body, iso(), extra);
+      return create(key, BEAD, body, iso(),
+        { state: 'proposal', origin: 'connector:totem', sourceApp, dedupeKey });
     },
     save,
 

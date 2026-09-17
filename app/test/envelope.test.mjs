@@ -279,3 +279,17 @@ test('an adopted proposal can be kept, like any other proposal', async () => {
   const env = await l.adoptBead(l.newKey(BEAD), body, {});
   assert.equal((await l.keep(env.key)).state, 'kept');
 });
+
+test('a record’s identity and stamps are create’s alone, not a caller’s to set', async () => {
+  const { loom: l } = await loom();
+  const body = { $type: BEAD, createdAt: '2026-09-17T10:00:00.000Z', kind: 'bloc',
+    provenance: { app: 'culturebloc', mintedAt: '2026-09-17T10:00:00.000Z' } };
+  const key = l.newKey(BEAD);
+  // adoptBead names only dedupeKey and sourceApp; anything else a caller
+  // invents must not reach the envelope.
+  const env = await l.adoptBead(key, body,
+    { dedupeKey: 'cb:x', sourceApp: 'culturebloc-totem', key: 'hijacked', hlc: 'nope', day: '1999-01-01' });
+  assert.equal(env.key, key);
+  assert.equal(env.day, '2026-09-17');
+  assert.notEqual(env.hlc, 'nope');
+});
