@@ -2,14 +2,14 @@
  * browsers keep serving the old one. A new version installs and waits; the
  * page tells it to take over once no edit is pending (loom.js). Requests to
  * other origins — the String — are never intercepted. */
-const VERSION = 'loom-4';
+const VERSION = 'loom-5';
 const SHELL = [
   './', './index.html', './loom.css', './loom.js', './manifest.webmanifest', './icon-192.png', './icon-512.png',
   './lib/anchors.js', './lib/backup.js', './lib/conflicts.js', './lib/day.js', './lib/envelope.js', './lib/hlc.js', './lib/images.js',
   './lib/importer.js', './lib/keys.js', './lib/lexicons.js', './lib/media.js', './lib/memstore.js', './lib/migrate.js',
   './lib/publisher.js', './lib/routing.js', './lib/sender.js', './lib/store.js', './lib/string-client.js', './lib/tid.js',
   './lib/totem-beads.js', './lib/totem-port.js', './lib/totem-protocol.js', './lib/totem-sync.js',
-  './ui/editor.js', './ui/html.js', './ui/pages.js', './ui/settings.js', './ui/string.js',
+  './ui/editor.js', './ui/feeds.js', './ui/html.js', './ui/pages.js', './ui/settings.js', './ui/string.js',
   './ui/view-bead.js', './ui/view-feeds.js', './ui/view-form.js', './ui/view-panels.js', './ui/view-publish.js',
   './ui/view-refs.js', './ui/view-strand.js', './ui/view-string.js',
   './vendor/lexicon.js', './vendor/refs.js', './vendor/strip.js',

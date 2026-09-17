@@ -624,3 +624,71 @@ test('with no String configured a strand shows no publishing surface', async () 
 
   assert.ok(!root.innerHTML.includes('class="publish"'));
 });
+
+/* The Feeds controller. `ctx.openPort` is the seam: the desk asks for a port
+ * and does not know it is Web Serial. */
+import { mountFeeds } from '../ui/feeds.js';
+import { CLEAN, CLEAR_OK } from './fixtures/totem-dumps.mjs';
+import { fakeSerial } from './fake-serial.mjs';
+import { openPort } from '../lib/totem-port.js';
+
+const totemCtx = async (reply) => {
+  const ctx = await context();
+  const f = fakeSerial({ reply });
+  ctx.serial = { present: true };
+  ctx.openPort = () => openPort({ serial: f.serial });
+  ctx.written = f.written;
+  return ctx;
+};
+
+test('Feeds offers connect, then pulls the totem’s beads in as proposals', async () => {
+  const ctx = await totemCtx(() => CLEAN);
+  const root = fakeRoot();
+  await mountFeeds(root, ctx);
+  assert.match(root.innerHTML, /data-action="connect"/);
+
+  await root.fire('click', button('connect'));
+  await root.fire('click', button('pull'));
+
+  const records = await ctx.store.allRecords();
+  assert.equal(records.length, 3);
+  assert.ok(records.every((r) => r.state === 'proposal'));
+  assert.match(root.innerHTML, /3 beads on the totem/);
+  assert.ok(ctx.events.includes('broadcast changed'), 'the String column hears about it');
+});
+
+test('the clear is offered after a clean pull and sends the device’s own count', async () => {
+  const ctx = await totemCtx((cmd) => (cmd.trim().startsWith('C') ? CLEAR_OK : CLEAN));
+  const root = fakeRoot();
+  await mountFeeds(root, ctx);
+  await root.fire('click', button('connect'));
+  await root.fire('click', button('pull'));
+  assert.match(root.innerHTML, /data-action="clear"/);
+
+  await root.fire('click', button('clear'));
+
+  assert.equal(ctx.written.at(-1), 'C3');
+});
+
+test('a sleeping totem is reported in words, and nothing is written', async () => {
+  const ctx = await context();
+  const f = fakeSerial({ neverAnswers: true });
+  ctx.openPort = () => openPort({ serial: f.serial });
+  const root = fakeRoot();
+  await mountFeeds(root, ctx);
+  await root.fire('click', button('connect'));
+
+  await root.fire('click', button('pull'));
+
+  assert.match(root.innerHTML, /didn’t answer|did not answer/);
+  assert.deepEqual(await ctx.store.allRecords(), []);
+});
+
+test('a browser with no Web Serial still renders, offering the paste path', async () => {
+  const ctx = await context();
+  ctx.openPort = null;
+  const root = fakeRoot();
+  await mountFeeds(root, ctx);
+  assert.match(root.innerHTML, /data-action="paste"/);
+  assert.ok(!root.innerHTML.includes('data-action="connect"'));
+});

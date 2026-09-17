@@ -72,6 +72,7 @@ export function topbarView({ pending = 0, connected = false, busy = false }) {
     <span class="status">${!connected ? html`<a href="#/settings">not connected</a>`
       : pending ? html`<a href="#/send">${plural(pending, 'change')} to send</a>` : 'in sync'}</span>
     ${connected ? html`<button type="button" class="primary" data-action="send" ${busy || !pending ? 'disabled' : ''}>${busy ? 'sending…' : 'send'}</button>` : ''}
+    <a class="feeds" href="#/feeds">feeds</a>
     <a class="settings" href="#/settings">settings</a>`;
 }
 
