@@ -77,7 +77,12 @@ export async function openLoom({ store, registry, now = () => Date.now(), newDev
 
   /* `at` is the moment of the save: the record's updatedAt, and the time its
    * body records. The options name every field a caller may set — identity and
-   * stamps are this function's alone, so they cannot be passed in. */
+   * stamps are this function's alone, so they cannot be passed in.
+   *
+   * That whitelist is defence-in-depth for a caller added later INSIDE this
+   * module: every public path (createBead, createStrand, adoptBead) already
+   * names its own arguments, so no test can reach create() with arbitrary
+   * options, and none pretends to. */
   async function create(key, type, body, at,
     { state = 'kept', origin = 'loom', sourceApp = 'loom', dedupeKey = null } = {}) {
     check(type, body);
