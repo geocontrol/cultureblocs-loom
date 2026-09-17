@@ -8,7 +8,7 @@ import { hasSerial } from '../lib/totem-port.js';
 import { parseDump } from '../lib/totem-protocol.js';
 import { absorbDump, readWardrobe, runClear, runPull, writeWardrobe } from '../lib/totem-sync.js';
 import { html, surfaceErrors } from './html.js';
-import { feedsView } from './view-feeds.js';
+import { feedsView, hexRgb } from './view-feeds.js';
 
 const today = (now) => new Date(now()).toISOString().slice(0, 10);
 
@@ -27,11 +27,18 @@ export async function mountFeeds(root, ctx) {
 
   /* Read the form fields the view owns, before an action uses them. */
   function readFields() {
+    const masks = state.masks.map((m) => ({ ...m }));
     for (const el of root.querySelectorAll?.('.feeds [name]') || []) {
       if (el.name === 'day') state.day = el.value || state.day;
       if (el.name === 'deviceLabel') state.deviceLabel = el.value.trim();
       if (el.name === 'paste') state.paste = el.value;
+      const mask = /^mask(Name|Colour):(\d+)$/.exec(el.name);
+      if (mask && masks[Number(mask[2])]) {
+        if (mask[1] === 'Name') masks[Number(mask[2])].name = el.value.trim();
+        else Object.assign(masks[Number(mask[2])], hexRgb(el.value));
+      }
     }
+    state.masks = masks;
   }
 
   async function busy(fn) {

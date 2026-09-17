@@ -22,15 +22,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /* A root whose querySelectorAll('form.editor [name]') answers with `fields`. */
 function fakeRoot(fields = []) {
   const listeners = {};
-  return {
+  // `self.fields`, not the closed-over param: a test may swap `root.fields`
+  // in place between actions, and querySelectorAll must see the current one.
+  const self = {
     innerHTML: '', textContent: '',
     fields,
     addEventListener: (t, f) => { listeners[t] = f; },
     removeEventListener: (t) => { delete listeners[t]; },
     querySelector: () => null,
-    querySelectorAll: (sel) => (sel === 'form.editor [name]' || sel === '.feeds [name]' ? fields : []),
+    querySelectorAll: (sel) => (sel === 'form.editor [name]' || sel === '.feeds [name]' ? self.fields : []),
     fire: (t, target) => listeners[t]?.({ target, preventDefault() {} }),
   };
+  return self;
 }
 
 const field = (name, value) => ({ name, value, type: 'text', closest: (sel) => (sel === 'form.editor' ? {} : null) });
@@ -723,4 +726,19 @@ test('a pasted dump is read from state, surviving the re-render that wipes the t
   assert.equal(records.length, 3);
   assert.ok(records.every((r) => r.state === 'proposal'));
   assert.match(root.innerHTML, /3 beads on the totem/);
+});
+
+test('a renamed mask is what gets written, and the untouched one survives', async () => {
+  const ctx = await totemCtx(totemReply);
+  const root = fakeRoot();
+  await mountFeeds(root, ctx);
+  await root.fire('click', button('connect'));
+  await root.fire('click', button('pull'));          // arms the wardrobe, reads two masks
+
+  root.fields = [field('maskName:0', 'arthouse'), field('maskColour:0', '#0d1f2d')];
+  await root.fire('click', button('wardrobe-save'));
+
+  // `M` is a full replace, so the whole wardrobe travels: the edited mask with
+  // its new name and colour, and `gig` exactly as it came off the device.
+  assert.equal(ctx.written.at(-1), 'arthouse|13|31|45\ngig|200|40|90\n.\n');
 });

@@ -70,8 +70,8 @@ export function feedsView(state = {}) {
         ${wardrobeArmed ? html`
           <fieldset class="wardrobe"><legend>masks on the device</legend>
             ${masks.length ? html`<ul>${masks.map((m, i) => html`<li data-mask="${i}">
-              <input name="maskName" value="${m.name}">
-              <input type="color" name="maskColour" value="${rgbHex(m)}">
+              <input name="maskName:${i}" value="${m.name}">
+              <input type="color" name="maskColour:${i}" value="${rgbHex(m)}">
               <button type="button" data-action="mask-remove" ${off}>remove</button></li>`)}</ul>`
     : html`<p class="empty">The device holds no masks.</p>`}
             <div class="row">
@@ -93,3 +93,11 @@ export function feedsView(state = {}) {
 
 const hex2 = (n) => Math.max(0, Math.min(255, n | 0)).toString(16).padStart(2, '0');
 export const rgbHex = (m) => `#${hex2(m.r)}${hex2(m.g)}${hex2(m.b)}`;
+
+/* '#rrggbb' -> {r,g,b}. The colour input always gives six hex digits. */
+export function hexRgb(hex) {
+  const h = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
+  if (!h) return { r: 0, g: 0, b: 0 };
+  const n = parseInt(h[1], 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
