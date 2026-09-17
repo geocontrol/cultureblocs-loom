@@ -504,12 +504,32 @@ test('a record that brought its own dedupe key is posted under it, not under loo
     newDeviceId: () => 'loom-test' });
   const body = { $type: BEAD, createdAt: '2026-09-17T10:00:00.000Z', kind: 'bloc',
     provenance: { app: 'culturebloc', mintedAt: '2026-09-17T10:00:00.000Z' } };
-  await l.adoptBead(l.newKey(BEAD), body, { dedupeKey: 'cb:deadbeef' });
+  const key = l.newKey(BEAD);
+  await l.adoptBead(key, body, { dedupeKey: 'cb:deadbeef' });
+  await l.keep(key);        // an adopted proposal is held until it is kept; see day.js pendingChange
 
   await runSend({ store, client: s.client });
 
   assert.equal(s.posted[0].dedupeKey, 'cb:deadbeef');
   assert.equal(s.posted[0].sourceApp, 'culturebloc-totem');
+});
+
+test('a totem proposal is held until it is kept', async () => {
+  const s = fakeString();
+  const store = createMemStore();
+  const l = await openLoom({ store, registry: await registry(), now: steppingNow(),
+    newDeviceId: () => 'loom-test' });
+  const body = { $type: BEAD, createdAt: '2026-09-17T10:00:00.000Z', kind: 'bloc',
+    provenance: { app: 'culturebloc', mintedAt: '2026-09-17T10:00:00.000Z' } };
+  const env = await l.adoptBead(l.newKey(BEAD), body, { dedupeKey: 'cb:held' });
+
+  const first = await runSend({ store, client: s.client });
+  assert.equal(s.posted.length, 0, 'nothing travels before it is kept');
+  assert.match(first.find((r) => r.key === env.key).reason, /still a proposal/);
+
+  await l.keep(env.key);
+  await runSend({ store, client: s.client });
+  assert.equal(s.posted[0].dedupeKey, 'cb:held');
 });
 
 test('a record Loom made still posts under loom:<rkey>', async () => {

@@ -58,6 +58,7 @@ export async function planSend(records) {
   for (const r of records) {
     if (r.conflict) held.push({ key: r.key, reason: 'changed on both sides: choose a version first' });
     else if (!r.stringId && !r.deleted && r.state === 'draft') held.push({ key: r.key, reason: 'still a draft' });
+    else if (!r.stringId && !r.deleted && r.state === 'proposal') held.push({ key: r.key, reason: 'still a proposal: keep it first' });
   }
   const byTime = (a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0);
   const pick = (change, strands) => records
