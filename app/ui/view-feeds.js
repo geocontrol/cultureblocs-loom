@@ -13,10 +13,10 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 function resultLine(r) {
   // "new" never takes an s, so it is interpolated rather than pluralised.
-  const bits = [`${r.added.length} new`];
+  const bits = [`${r.added?.length ?? 0} new`];
   if (r.duplicate) bits.push(`${r.duplicate} already here`);
   if (r.skipped) bits.push(`${r.skipped} struck on the device`);
-  return `${plural(r.count, 'bead')} on the totem — ${bits.join(', ')}.`;
+  return `${plural(r.count ?? 0, 'bead')} on the totem — ${bits.join(', ')}.`;
 }
 
 /* state: { serial, connected, busy, result, needsDay, day, deviceId, deviceLabel,
@@ -24,9 +24,10 @@ function resultLine(r) {
 export function feedsView(state = {}) {
   const { serial = true, connected = false, busy = false, result = null, needsDay = false,
     day = '', deviceId = '', deviceLabel = '', masks = [], wardrobeArmed = false,
-    error = '' } = state;
+    paste = '', error = '' } = state;
+  const problems = result?.problems ?? [];
   const clash = Boolean(deviceId && deviceLabel && deviceLabel !== deviceId);
-  const canClear = Boolean(result && !result.problems.length && result.count > 0);
+  const canClear = Boolean(result && !problems.length && (result.count ?? 0) > 0);
   const off = busy ? 'disabled' : '';
 
   return html`
@@ -50,8 +51,8 @@ export function feedsView(state = {}) {
         </div>
 
         ${result ? html`<p class="result">${resultLine(result)}</p>` : ''}
-        ${result && result.problems.length
-    ? html`<ul class="problems">${result.problems.map((p) => html`<li>${p}</li>`)}</ul>
+        ${result && problems.length
+    ? html`<ul class="problems">${problems.map((p) => html`<li>${p}</li>`)}</ul>
              <p class="hint">The totem has not been cleared, so nothing is lost. Pull again.</p>`
     : ''}
 
@@ -83,7 +84,7 @@ export function feedsView(state = {}) {
           <summary>paste a dump instead</summary>
           <p class="hint">Send <code>D</code> in a serial monitor and copy the block,
             <code>---BEADS-BEGIN---</code> to <code>---BEADS-END---</code>.</p>
-          <textarea name="paste" rows="4"></textarea>
+          <textarea name="paste" rows="4">${paste}</textarea>
           <button type="button" data-action="paste" ${off}>read the pasted dump</button>
         </details>
       </article>

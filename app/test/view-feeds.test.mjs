@@ -80,3 +80,18 @@ test('an error is shown, and device names are escaped rather than injected', () 
   assert.match(html, /didn’t answer/);
   assert.ok(!html.includes('<script>'));
 });
+
+test('every device-supplied string reaches the markup escaped', () => {
+  const bad = '"><script>alert(1)</script>';
+  const html = view({ connected: true, deviceId: bad, deviceLabel: 'other',
+    wardrobeArmed: true, masks: [{ name: bad, r: 1, g: 2, b: 3 }],
+    result: { count: 1, added: [], duplicate: 0, skipped: 0, problems: [bad] } });
+  assert.ok(!html.includes('<script>'));
+  // the device hint, the clash warning, the mask name and the problem line
+  assert.ok(html.split('&lt;script&gt;').length - 1 >= 3);
+});
+
+test('a result missing fields renders instead of taking the surface down', () => {
+  assert.doesNotThrow(() => view({ connected: true, result: { count: 3, added: ['a'] } }));
+  assert.doesNotThrow(() => view({ connected: true, result: {} }));
+});
