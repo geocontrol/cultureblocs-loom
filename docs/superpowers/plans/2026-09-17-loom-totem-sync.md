@@ -992,7 +992,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BEAD, openLoom } from '../lib/envelope.js';
 import { createMemStore } from '../lib/memstore.js';
-import { runClear, runPull, readWardrobe, writeWardrobe } from '../lib/totem-sync.js';
+import { absorbDump, readWardrobe, runClear, runPull, writeWardrobe } from '../lib/totem-sync.js';
+import { parseDump } from '../lib/totem-protocol.js';
 import { fakeSerial } from './fake-serial.mjs';
 import { openPort } from '../lib/totem-port.js';
 import { CLEAN, CLEAR_OK, CLEAR_REFUSED, MALFORMED, TRUNCATED, WARDROBE }
@@ -1275,8 +1276,11 @@ test('once connected, the totem can be pulled', () => {
 test('a pull reports what arrived, and offers the clear', () => {
   const html = view({ connected: true,
     result: { deviceId: 'bloc-7', count: 3, added: ['a', 'b'], duplicate: 1, skipped: 0, problems: [] } });
-  assert.match(html, /2 new/);
+  // The comma is load-bearing: "2 new," cannot match a wrongly pluralised
+  // "2 news,", whereas a bare /2 new/ would pass on either.
+  assert.match(html, /2 new,/);
   assert.match(html, /1 already here/);
+  assert.match(html, /3 beads on the totem/);
   assert.match(html, /data-action="clear"/);
 });
 
@@ -1352,7 +1356,8 @@ import { html } from './html.js';
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 function resultLine(r) {
-  const bits = [`${plural(r.added.length, 'new')}`];
+  // "new" never takes an s, so it is interpolated rather than pluralised.
+  const bits = [`${r.added.length} new`];
   if (r.duplicate) bits.push(`${r.duplicate} already here`);
   if (r.skipped) bits.push(`${r.skipped} struck on the device`);
   return `${plural(r.count, 'bead')} on the totem — ${bits.join(', ')}.`;
