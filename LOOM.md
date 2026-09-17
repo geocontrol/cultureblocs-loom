@@ -889,10 +889,6 @@ touched the backfill queue.
 
 ## Related
 
-- [`docs/backlog.md`](docs/backlog.md) — things noted in use and not yet
-  designed: Totem beads into Loom, syndication to Instagram and Bluesky, a
-  public wall, and the model choice for §9's extractor. Each entry says which
-  section here would move if it were taken up.
 - [`ROADMAP.md`](https://github.com/geocontrol/cultureblocs-string/blob/main/ROADMAP.md) — §1 (the String), §2 (capture surfaces,
   witness workers). Loom is a way of doing much of both at once.
 - [`HOST-SPEC.md`](https://github.com/geocontrol/cultureblocs-string/blob/main/HOST-SPEC.md) — the DataBrick, which this design
