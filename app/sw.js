@@ -10,7 +10,7 @@ const SHELL = [
   './lib/publisher.js', './lib/routing.js', './lib/sender.js', './lib/store.js', './lib/string-client.js', './lib/tid.js',
   './lib/totem-beads.js', './lib/totem-port.js', './lib/totem-protocol.js', './lib/totem-sync.js',
   './ui/editor.js', './ui/html.js', './ui/pages.js', './ui/settings.js', './ui/string.js',
-  './ui/view-bead.js', './ui/view-form.js', './ui/view-panels.js', './ui/view-publish.js',
+  './ui/view-bead.js', './ui/view-feeds.js', './ui/view-form.js', './ui/view-panels.js', './ui/view-publish.js',
   './ui/view-refs.js', './ui/view-strand.js', './ui/view-string.js',
   './vendor/lexicon.js', './vendor/refs.js', './vendor/strip.js',
 ];
