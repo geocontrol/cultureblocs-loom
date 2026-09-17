@@ -22,10 +22,14 @@ export class DumpError extends Error {}
 /* The text between two markers, or a DumpError naming which one is missing. */
 function framed(text, begin, end, what) {
   const s = String(text ?? '');
-  const from = s.indexOf(begin);
-  if (from === -1) throw new DumpError(`this is not a ${what}: no ${begin}`);
+  if (s.indexOf(begin) === -1) throw new DumpError(`this is not a ${what}: no ${begin}`);
   const to = s.indexOf(end);
   if (to === -1) throw new DumpError(`the ${what} is truncated: no ${end}`);
+  // The LAST begin before this end: a timed-out read leaves a stale header in
+  // the port's carry-over buffer, and parsing `staleHeader + freshDump` would
+  // take the stale clock and silently misdate every bead in the fresh one.
+  const from = s.lastIndexOf(begin, to);
+  if (from === -1) throw new DumpError(`this is not a ${what}: no ${begin} before ${end}`);
   return s.slice(from + begin.length, to);
 }
 

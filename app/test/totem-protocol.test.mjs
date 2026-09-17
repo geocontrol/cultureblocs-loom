@@ -38,6 +38,19 @@ test('a dump with no begin marker is not a dump', () => {
   assert.throws(() => parseDump(''), DumpError);
 });
 
+test('a stale header left in the buffer does not win over the fresh dump’s clock', () => {
+  // A pull that timed out after the header leaves it in readUntil's carry-over.
+  const stale = '---BEADS-BEGIN---\n---DEVICE bloc-7---\n---NOW 500 EPOCH 2---\n';
+  const d = parseDump(stale + CLEAN);
+  assert.equal(d.now, 9000, 'the fresh dump’s clock, not the stale one');
+  assert.equal(d.epoch, 3);
+  assert.equal(d.beads.length, 3);
+});
+
+test('an end marker before any begin marker is not a frame', () => {
+  assert.throws(() => parseDump(`---BEADS-END---${CLEAN}`), DumpError);
+});
+
 test('the wardrobe parses to masks with their colours', () => {
   assert.deepEqual(parseWardrobe(WARDROBE), [
     { name: 'cinema', r: 13, g: 217, b: 53 },
