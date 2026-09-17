@@ -20,11 +20,11 @@ function resultLine(r) {
 }
 
 /* state: { serial, connected, busy, result, needsDay, day, deviceId, deviceLabel,
- *          masks, wardrobeArmed, paste, error } */
+ *          masks, wardrobeArmed, paste, error, confirmClear } */
 export function feedsView(state = {}) {
   const { serial = true, connected = false, busy = false, result = null, needsDay = false,
     day = '', deviceId = '', deviceLabel = '', masks = [], wardrobeArmed = false,
-    paste = '', error = '' } = state;
+    paste = '', error = '', confirmClear = false } = state;
   const problems = result?.problems ?? [];
   const clash = Boolean(deviceId && deviceLabel && deviceLabel !== deviceId);
   const canClear = Boolean(result && !problems.length && (result.count ?? 0) > 0);
@@ -47,7 +47,9 @@ export function feedsView(state = {}) {
         <div class="row">
           ${serial && !connected ? html`<button type="button" class="primary" data-action="connect" ${off}>connect</button>` : ''}
           ${serial && connected ? html`<button type="button" class="primary" data-action="pull" ${off}>${busy ? 'pulling…' : 'pull'}</button>` : ''}
-          ${canClear ? html`<button type="button" class="danger" data-action="clear" ${off}>clear the totem</button>` : ''}
+          ${canClear && !confirmClear ? html`<button type="button" class="danger" data-action="clear-arm" ${off}>clear the totem</button>` : ''}
+          ${canClear && confirmClear ? html`<button type="button" class="danger" data-action="clear" ${off}>${busy ? 'clearing…' : 'yes, erase the totem'}</button>
+            <button type="button" data-action="clear-cancel" ${off}>cancel</button>` : ''}
         </div>
 
         ${result ? html`<p class="result">${resultLine(result)}</p>` : ''}

@@ -17,7 +17,7 @@ export async function mountFeeds(root, ctx) {
     serial: Boolean(ctx.openPort) && (ctx.serial?.present ?? hasSerial()),
     connected: false, busy: false, result: null, needsDay: false,
     day: today(ctx.now), deviceId: '', deviceLabel: '', masks: [], wardrobeArmed: false,
-    paste: '', error: '',
+    paste: '', error: '', confirmClear: false,
   };
   let port = null;
 
@@ -61,6 +61,7 @@ export async function mountFeeds(root, ctx) {
     state.deviceId = r.deviceId || state.deviceId;
     if (!state.deviceLabel && r.deviceId) state.deviceLabel = r.deviceId;
     state.needsDay = r.needsDay;
+    state.confirmClear = false;
     if (r.added.length) ctx.broadcast();
   }
 
@@ -84,10 +85,13 @@ export async function mountFeeds(root, ctx) {
         state.wardrobeArmed = true;     // armed only after a successful pull
       });
     }
+    if (action === 'clear-arm') { state.confirmClear = true; return render(); }
+    if (action === 'clear-cancel') { state.confirmClear = false; return render(); }
     if (action === 'clear') {
       return busy(async () => {
+        if (!port || state.result?.problems?.length) return;   // the view withholds this, but the gate belongs here too
         const r = await runClear({ port, count: state.result.count });
-        if (r.ok) { state.result = null; state.wardrobeArmed = false; }
+        if (r.ok) { state.result = null; state.wardrobeArmed = false; state.confirmClear = false; }
         else state.error = `the totem refused: it holds ${r.have} beads, not ${r.want}. Pull again.`;
       });
     }

@@ -676,11 +676,31 @@ test('the clear is offered after a clean pull and sends the device’s own count
   await mountFeeds(root, ctx);
   await root.fire('click', button('connect'));
   await root.fire('click', button('pull'));
-  assert.match(root.innerHTML, /data-action="clear"/);
+  assert.match(root.innerHTML, /data-action="clear-arm"/);
+
+  await root.fire('click', button('clear-arm'));
+  assert.match(root.innerHTML, /yes, erase the totem/);
 
   await root.fire('click', button('clear'));
 
   assert.equal(ctx.written.at(-1), 'C3');
+});
+
+test('cancelling the armed clear stands down without sending anything', async () => {
+  const ctx = await totemCtx(totemReply);
+  const root = fakeRoot();
+  await mountFeeds(root, ctx);
+  await root.fire('click', button('connect'));
+  await root.fire('click', button('pull'));
+
+  await root.fire('click', button('clear-arm'));
+  assert.match(root.innerHTML, /yes, erase the totem/);
+
+  await root.fire('click', button('clear-cancel'));
+
+  assert.ok(!root.innerHTML.includes('yes, erase the totem'));
+  assert.match(root.innerHTML, /data-action="clear-arm"/);
+  assert.ok(!ctx.written.some((w) => /^C\d+$/.test(w)), 'no clear command reached the device');
 });
 
 test('a sleeping totem is reported in words, and nothing is written', async () => {

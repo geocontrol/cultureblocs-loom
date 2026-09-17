@@ -23,7 +23,7 @@ test('once connected, the totem can be pulled', () => {
   assert.match(html, /data-action="pull"/);
 });
 
-test('a pull reports what arrived, and offers the clear', () => {
+test('a pull reports what arrived, and offers the clear (armed, not yet confirmed)', () => {
   const html = view({ connected: true,
     result: { deviceId: 'bloc-7', count: 3, added: ['a', 'b'], duplicate: 1, skipped: 0, problems: [] } });
   // The comma is load-bearing: "2 new," cannot match a wrongly pluralised
@@ -31,7 +31,17 @@ test('a pull reports what arrived, and offers the clear', () => {
   assert.match(html, /2 new,/);
   assert.match(html, /1 already here/);
   assert.match(html, /3 beads on the totem/);
+  assert.match(html, /data-action="clear-arm"/);
+  assert.ok(!html.includes('yes, erase the totem'), 'not confirmed yet');
+});
+
+test('once armed, the clear asks for a confirming click', () => {
+  const html = view({ connected: true, confirmClear: true,
+    result: { deviceId: 'bloc-7', count: 3, added: ['a', 'b'], duplicate: 1, skipped: 0, problems: [] } });
   assert.match(html, /data-action="clear"/);
+  assert.match(html, /data-action="clear-cancel"/);
+  assert.match(html, /yes, erase the totem/);
+  assert.ok(!html.includes('data-action="clear-arm"'));
 });
 
 test('a pull with a problem withholds the clear and says why', () => {
