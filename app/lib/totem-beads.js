@@ -71,7 +71,7 @@ export function toBeads(dump, { syncWallClock, day, deviceLabel = '' } = {}) {
     const dedupeKey = o.mintId
       ? `cb:${o.mintId}`
       : `cb:${device}:${createdAt.slice(0, 10)}:${o.ep ?? 0}:${o.seq}:${t}`;
-    out.push({ dedupeKey, createdAt, timeAnchored, body });
+    out.push({ dedupeKey, createdAt, timeAnchored, body, seq: o.seq, mask: o.mask });
   }
   return out;
 }

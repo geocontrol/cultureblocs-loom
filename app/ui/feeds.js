@@ -73,8 +73,14 @@ export async function mountFeeds(root, ctx) {
 
     if (action === 'connect') {
       return busy(async () => {
-        port = await ctx.openPort();
-        state.connected = true;
+        try {
+          port = await ctx.openPort();
+          state.connected = true;
+        } catch (err) {
+          // A cancelled port picker is a silent no-op (spec §8), not a fault.
+          if (err?.name === 'NotFoundError' || err?.name === 'AbortError') return;
+          throw err;
+        }
       });
     }
     if (action === 'pull') {

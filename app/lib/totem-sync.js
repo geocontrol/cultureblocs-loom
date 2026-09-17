@@ -24,6 +24,7 @@ export async function absorbDump({ store, loom, dump, syncWallClock, day, device
   const known = new Set((await store.allRecords()).map((r) => r.dedupeKey).filter(Boolean));
   const added = [];
   let duplicate = 0;
+  let refused = 0;
   for (const bead of toBeads(dump, { syncWallClock, day, deviceLabel })) {
     if (known.has(bead.dedupeKey)) { duplicate += 1; continue; }
     try {
@@ -31,7 +32,9 @@ export async function absorbDump({ store, loom, dump, syncWallClock, day, device
       added.push(env.key);
       known.add(bead.dedupeKey);
     } catch (err) {
-      problems.push(`a bead from ${dump.deviceId || 'the totem'} was refused: ${err.message}`);
+      refused += 1;
+      const named = `seq ${bead.seq ?? '?'}${bead.mask ? ` (${bead.mask})` : ''}`;
+      problems.push(`a bead from ${dump.deviceId || 'the totem'}, ${named}, was refused: ${err.message}`);
     }
   }
   return {
@@ -39,7 +42,9 @@ export async function absorbDump({ store, loom, dump, syncWallClock, day, device
     count: dump.beads.length + dump.unparsed.length,   // what the device holds
     added,
     duplicate,
-    skipped: dump.beads.length - added.length - duplicate,
+    // Struck on the device only — a refusal is a validation failure, not a
+    // struck bead, and reporting it as "struck" would be false.
+    skipped: dump.beads.length - added.length - duplicate - refused,
     problems,
     needsDay: needsDay(dump),
   };
