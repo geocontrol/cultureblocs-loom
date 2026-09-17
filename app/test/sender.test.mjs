@@ -494,3 +494,32 @@ test('restoring a backup taken before a send, then importing, links the sent rec
   assert.deepEqual(await runSend({ store, client: s.client }), []);
   assert.equal(s.posted.length, 2, 'nothing was posted again');
 });
+
+test('a record that brought its own dedupe key is posted under it, not under loom:', async () => {
+  // A totem bead keeps `cb:<mintId>` so the String dedupes it against
+  // anything Studio pushed; posting it as loom:<rkey> would mint a twin.
+  const s = fakeString();
+  const store = createMemStore();
+  const l = await openLoom({ store, registry: await registry(), now: steppingNow(),
+    newDeviceId: () => 'loom-test' });
+  const body = { $type: BEAD, createdAt: '2026-09-17T10:00:00.000Z', kind: 'bloc',
+    provenance: { app: 'culturebloc', mintedAt: '2026-09-17T10:00:00.000Z' } };
+  await l.adoptBead(l.newKey(BEAD), body, { dedupeKey: 'cb:deadbeef' });
+
+  await runSend({ store, client: s.client });
+
+  assert.equal(s.posted[0].dedupeKey, 'cb:deadbeef');
+  assert.equal(s.posted[0].sourceApp, 'culturebloc-totem');
+});
+
+test('a record Loom made still posts under loom:<rkey>', async () => {
+  const s = fakeString();
+  const store = createMemStore();
+  const l = await openLoom({ store, registry: await registry(), now: steppingNow(),
+    newDeviceId: () => 'loom-test' });
+  const bead = await makeBead(l);
+
+  await runSend({ store, client: s.client });
+
+  assert.equal(s.posted[0].dedupeKey, `loom:${bead.rkey}`);
+});
