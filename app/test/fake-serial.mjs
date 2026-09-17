@@ -20,11 +20,15 @@ export function fakeSerial({ reply = () => '', chunk = 0, neverAnswers = false,
       const cmd = new TextDecoder().decode(bytes);
       written.push(cmd);
       if (neverAnswers) return;
-      if (disconnect) { finish(); return; }
+      // A disconnect can happen after the device managed to send something (a
+      // dump cut off mid-transfer), so the reply still goes out before the
+      // stream closes — closing first, as before, silently discarded it.
       const text = reply(cmd);
-      if (!text) return;
-      if (!chunk) { emit(text); return; }
-      for (let i = 0; i < text.length; i += chunk) emit(text.slice(i, i + chunk));
+      if (text) {
+        if (!chunk) emit(text);
+        else for (let i = 0; i < text.length; i += chunk) emit(text.slice(i, i + chunk));
+      }
+      if (disconnect) finish();
     },
   });
 
