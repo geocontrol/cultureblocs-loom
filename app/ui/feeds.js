@@ -7,7 +7,7 @@
 import { hasSerial } from '../lib/totem-port.js';
 import { parseDump } from '../lib/totem-protocol.js';
 import { absorbDump, readWardrobe, runClear, runPull, writeWardrobe } from '../lib/totem-sync.js';
-import { errorLine, html, surfaceErrors } from './html.js';
+import { html, surfaceErrors } from './html.js';
 import { feedsView } from './view-feeds.js';
 
 const today = (now) => new Date(now()).toISOString().slice(0, 10);

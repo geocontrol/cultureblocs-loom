@@ -28,7 +28,7 @@ function fakeRoot(fields = []) {
     addEventListener: (t, f) => { listeners[t] = f; },
     removeEventListener: (t) => { delete listeners[t]; },
     querySelector: () => null,
-    querySelectorAll: (sel) => (sel === 'form.editor [name]' ? fields : []),
+    querySelectorAll: (sel) => (sel === 'form.editor [name]' || sel === '.feeds [name]' ? fields : []),
     fire: (t, target) => listeners[t]?.({ target, preventDefault() {} }),
   };
 }
@@ -709,4 +709,18 @@ test('a browser with no Web Serial still renders, offering the paste path', asyn
   await mountFeeds(root, ctx);
   assert.match(root.innerHTML, /data-action="paste"/);
   assert.ok(!root.innerHTML.includes('data-action="connect"'));
+});
+
+test('a pasted dump is read from state, surviving the re-render that wipes the textarea', async () => {
+  const ctx = await context();
+  ctx.openPort = null;                    // no Web Serial: paste is the only way in
+  const root = fakeRoot([field('paste', CLEAN)]);
+  await mountFeeds(root, ctx);
+
+  await root.fire('click', button('paste'));
+
+  const records = await ctx.store.allRecords();
+  assert.equal(records.length, 3);
+  assert.ok(records.every((r) => r.state === 'proposal'));
+  assert.match(root.innerHTML, /3 beads on the totem/);
 });
