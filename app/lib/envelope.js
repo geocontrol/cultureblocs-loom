@@ -76,13 +76,14 @@ export async function openLoom({ store, registry, now = () => Date.now(), newDev
   }
 
   /* `at` is the moment of the save: the record's updatedAt, and the time its body records. */
-  async function create(key, type, body, at) {
+  async function create(key, type, body, at, extra = {}) {
     check(type, body);
     if (await store.getRecord(key)) throw new Error(`${key} already exists`);
     const env = {
       key, type, rkey: key.slice(type.length + 1), body, state: 'kept', origin: 'loom', sourceApp: 'loom',
       createdAt: body.createdAt, updatedAt: at, hlc: await stamp(), deviceId,
       day: dayOf(type, body, body.createdAt),
+      ...extra,
     };
     await store.putRecord(env);
     await store.deleteMeta(`draft:${key}`);
@@ -149,6 +150,21 @@ export async function openLoom({ store, registry, now = () => Date.now(), newDev
     createStrand(key, body) {
       const at = iso();
       return create(key, STRAND, { ...body, $type: STRAND, createdAt: at, items: list(body.items) }, at);
+    },
+
+    /* A bead minted on a device and pulled in over serial. It arrives whole
+     * and already triaged on the device, so its body — provenance included —
+     * is the device's own, not Loom's. It lands as a `proposal`: the dotted
+     * rail in the String column is the review, kept or released in place.
+     *
+     * `dedupeKey` is the device's own identity for the bead (`cb:…`), carried
+     * so Send posts it instead of `loom:<rkey>` and the String dedupes it
+     * against anything Studio pushed. Validated like any other write: unlike
+     * an import, this record is not on the String yet. */
+    adoptBead(key, body, { dedupeKey = null, sourceApp = 'culturebloc-totem' } = {}) {
+      const extra = { state: 'proposal', origin: 'connector:totem', sourceApp };
+      if (dedupeKey) extra.dedupeKey = dedupeKey;
+      return create(key, BEAD, body, iso(), extra);
     },
     save,
 

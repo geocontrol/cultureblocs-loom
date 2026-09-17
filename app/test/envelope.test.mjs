@@ -235,3 +235,47 @@ test('a record the String has published cannot be deleted, whatever its state sa
   assert.equal(whyNotDeletable({ type: STRAND, state: 'kept', publishedUri: null }), null,
     'a record the String says is not published deletes as normal');
 });
+
+test('a bead minted on a device is adopted as a proposal, keeping its own provenance', async () => {
+  const { store, loom: l } = await loom();
+  const body = {
+    $type: BEAD, createdAt: '2026-09-17T10:57:20.000Z', kind: 'bloc', tags: ['cinema'],
+    provenance: { app: 'culturebloc', device: 'bloc-7', mintedAt: '2026-09-17T10:57:20.000Z',
+      mutualMint: false, timeAnchored: true },
+  };
+  const env = await l.adoptBead(l.newKey(BEAD), body, { dedupeKey: 'cb:bloc-7:2026-09-17:3:1:x' });
+
+  assert.equal(env.state, 'proposal', 'it sits on the dotted rail until kept');
+  assert.equal(env.origin, 'connector:totem');
+  assert.equal(env.sourceApp, 'culturebloc-totem');
+  assert.equal(env.dedupeKey, 'cb:bloc-7:2026-09-17:3:1:x');
+  assert.equal(env.body.provenance.app, 'culturebloc', 'the device’s provenance, not Loom’s');
+  assert.equal(env.day, '2026-09-17');
+  assert.ok(env.hlc, 'stamped by this device’s clock like any other write');
+  assert.deepEqual(await store.getRecord(env.key), env);
+});
+
+test('an adopted bead is validated like any other write, because it is not on the String yet', async () => {
+  const { loom: l } = await loom();
+  await assert.rejects(
+    l.adoptBead(l.newKey(BEAD), { $type: BEAD, createdAt: '2026-09-17T10:00:00.000Z' }, {}),
+    InvalidRecord, 'kind is required',
+  );
+});
+
+test('adopting over an existing key is refused', async () => {
+  const { loom: l } = await loom();
+  const body = { $type: BEAD, createdAt: '2026-09-17T10:00:00.000Z', kind: 'bloc',
+    provenance: { app: 'culturebloc', mintedAt: '2026-09-17T10:00:00.000Z' } };
+  const key = l.newKey(BEAD);
+  await l.adoptBead(key, body, {});
+  await assert.rejects(l.adoptBead(key, body, {}), /already exists/);
+});
+
+test('an adopted proposal can be kept, like any other proposal', async () => {
+  const { loom: l } = await loom();
+  const body = { $type: BEAD, createdAt: '2026-09-17T10:00:00.000Z', kind: 'bloc',
+    provenance: { app: 'culturebloc', mintedAt: '2026-09-17T10:00:00.000Z' } };
+  const env = await l.adoptBead(l.newKey(BEAD), body, {});
+  assert.equal((await l.keep(env.key)).state, 'kept');
+});
