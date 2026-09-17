@@ -58,6 +58,7 @@ export async function planSend(records) {
   for (const r of records) {
     if (r.conflict) held.push({ key: r.key, reason: 'changed on both sides: choose a version first' });
     else if (!r.stringId && !r.deleted && r.state === 'draft') held.push({ key: r.key, reason: 'still a draft' });
+    else if (!r.stringId && !r.deleted && r.state === 'proposal') held.push({ key: r.key, reason: 'still a proposal: keep it first' });
   }
   const byTime = (a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0);
   const pick = (change, strands) => records
@@ -192,8 +193,10 @@ export async function runSend({ store, client, now = () => Date.now(), onProgres
     async post(env) {
       await uploadPhotos(env);
       const body = await stringBody(env);
-      const [res] = await client.postRecords([{ dedupeKey: `loom:${env.rkey}`, type: env.type,
-        sourceApp: env.sourceApp || 'loom', createdAt: env.createdAt, body }]);
+      // A record adopted from a device brings its own identity (`cb:…`); the
+      // String must dedupe it against what that device already pushed.
+      const [res] = await client.postRecords([{ dedupeKey: env.dedupeKey || `loom:${env.rkey}`,
+        type: env.type, sourceApp: env.sourceApp || 'loom', createdAt: env.createdAt, body }]);
       if (res.status !== 'created' && res.status !== 'duplicate') return markInvalid(env.key, res.problems || []);
       await link(env.key, await client.getRecord(res.id));   // the String's version, for later edits
       return { status: 'sent', stringId: res.id };

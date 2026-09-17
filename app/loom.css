@@ -114,3 +114,14 @@ pre{margin:0;white-space:pre-wrap;font:12px var(--mono)}
 .publish .chip-line{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:.2rem 0}
 .publish .chip.published{color:var(--visit);border-color:var(--visit)}
 .publish .uri{font:11px var(--mono);color:var(--faint);word-break:break-all}
+.feeds{max-width:44rem}
+.feed{border:1px solid var(--line);border-radius:6px;padding:.6rem .9rem 1rem;margin:.8rem 0}
+.feed h3{font:12px var(--mono);color:var(--faint);font-weight:400;margin:.2rem 0 .5rem;text-transform:lowercase}
+.feed .row{align-items:center;margin:.7rem 0}
+.feed .result{font:12px var(--mono);margin:.4rem 0}
+.feed .problems{margin:.3rem 0 .3rem 1.1rem;font-size:14px;color:var(--performance)}
+.feed .warn{font-size:14px;color:var(--dwell);margin:.3rem 0}
+.feed .wardrobe ul{list-style:none;margin:0;padding:0}
+.feed .wardrobe li{display:flex;gap:.5rem;align-items:center;margin:.3rem 0}
+.feed .paste summary{font-size:14px;color:var(--faint);cursor:pointer}
+.feed .paste textarea{width:100%;font:12px var(--mono)}

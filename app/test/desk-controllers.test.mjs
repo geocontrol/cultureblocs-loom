@@ -22,15 +22,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /* A root whose querySelectorAll('form.editor [name]') answers with `fields`. */
 function fakeRoot(fields = []) {
   const listeners = {};
-  return {
+  // `self.fields`, not the closed-over param: a test may swap `root.fields`
+  // in place between actions, and querySelectorAll must see the current one.
+  const self = {
     innerHTML: '', textContent: '',
     fields,
     addEventListener: (t, f) => { listeners[t] = f; },
     removeEventListener: (t) => { delete listeners[t]; },
     querySelector: () => null,
-    querySelectorAll: (sel) => (sel === 'form.editor [name]' ? fields : []),
+    querySelectorAll: (sel) => (sel === 'form.editor [name]' || sel === '.feeds [name]' ? self.fields : []),
     fire: (t, target) => listeners[t]?.({ target, preventDefault() {} }),
   };
+  return self;
 }
 
 const field = (name, value) => ({ name, value, type: 'text', closest: (sel) => (sel === 'form.editor' ? {} : null) });
@@ -623,4 +626,139 @@ test('with no String configured a strand shows no publishing surface', async () 
   await mountEditor(root, ctx, { key: strand.key });
 
   assert.ok(!root.innerHTML.includes('class="publish"'));
+});
+
+/* The Feeds controller. `ctx.openPort` is the seam: the desk asks for a port
+ * and does not know it is Web Serial. */
+import { mountFeeds } from '../ui/feeds.js';
+import { CLEAN, CLEAR_OK, WARDROBE } from './fixtures/totem-dumps.mjs';
+import { fakeSerial } from './fake-serial.mjs';
+import { openPort, PortError } from '../lib/totem-port.js';
+
+const totemCtx = async (reply) => {
+  const ctx = await context();
+  const f = fakeSerial({ reply });
+  ctx.serial = { present: true };
+  ctx.openPort = () => openPort({ serial: f.serial });
+  ctx.written = f.written;
+  return ctx;
+};
+
+/* Answers each command the way the device would. Replying to everything with
+ * the bead dump leaves readWardrobe waiting out its own timeout. */
+const totemReply = (cmd) => {
+  const c = cmd.trim();
+  if (c === 'D') return CLEAN;
+  if (c === 'W') return WARDROBE;
+  if (c.startsWith('C')) return CLEAR_OK;
+  return '';
+};
+
+test('Feeds offers connect, then pulls the totem’s beads in as proposals', async () => {
+  const ctx = await totemCtx(totemReply);
+  const root = fakeRoot();
+  await mountFeeds(root, ctx);
+  assert.match(root.innerHTML, /data-action="connect"/);
+
+  await root.fire('click', button('connect'));
+  await root.fire('click', button('pull'));
+
+  const records = await ctx.store.allRecords();
+  assert.equal(records.length, 3);
+  assert.ok(records.every((r) => r.state === 'proposal'));
+  assert.match(root.innerHTML, /3 beads on the totem/);
+  assert.ok(ctx.events.includes('broadcast changed'), 'the String column hears about it');
+});
+
+test('the clear is offered after a clean pull and sends the device’s own count', async () => {
+  const ctx = await totemCtx(totemReply);
+  const root = fakeRoot();
+  await mountFeeds(root, ctx);
+  await root.fire('click', button('connect'));
+  await root.fire('click', button('pull'));
+  assert.match(root.innerHTML, /data-action="clear-arm"/);
+
+  await root.fire('click', button('clear-arm'));
+  assert.match(root.innerHTML, /yes, erase the totem/);
+
+  await root.fire('click', button('clear'));
+
+  assert.equal(ctx.written.at(-1), 'C3');
+});
+
+test('cancelling the armed clear stands down without sending anything', async () => {
+  const ctx = await totemCtx(totemReply);
+  const root = fakeRoot();
+  await mountFeeds(root, ctx);
+  await root.fire('click', button('connect'));
+  await root.fire('click', button('pull'));
+
+  await root.fire('click', button('clear-arm'));
+  assert.match(root.innerHTML, /yes, erase the totem/);
+
+  await root.fire('click', button('clear-cancel'));
+
+  assert.ok(!root.innerHTML.includes('yes, erase the totem'));
+  assert.match(root.innerHTML, /data-action="clear-arm"/);
+  assert.ok(!ctx.written.some((w) => /^C\d+$/.test(w)), 'no clear command reached the device');
+});
+
+test('a sleeping totem is reported in words, and nothing is written', async () => {
+  const ctx = await context();
+  // The port's own 8s timeout is covered in totem-port.test.mjs; here we only
+  // need the controller to surface the failure, so the port rejects at once
+  // rather than making the suite wait for it.
+  ctx.openPort = async () => ({
+    async send() {},
+    async readUntil() {
+      throw new PortError('the totem didn’t answer — wake it with a button press and pull again');
+    },
+    async close() {},
+  });
+  const root = fakeRoot();
+  await mountFeeds(root, ctx);
+  await root.fire('click', button('connect'));
+
+  await root.fire('click', button('pull'));
+
+  assert.match(root.innerHTML, /didn’t answer|did not answer/);
+  assert.deepEqual(await ctx.store.allRecords(), []);
+});
+
+test('a browser with no Web Serial still renders, offering the paste path', async () => {
+  const ctx = await context();
+  ctx.openPort = null;
+  const root = fakeRoot();
+  await mountFeeds(root, ctx);
+  assert.match(root.innerHTML, /data-action="paste"/);
+  assert.ok(!root.innerHTML.includes('data-action="connect"'));
+});
+
+test('a pasted dump is read from state, surviving the re-render that wipes the textarea', async () => {
+  const ctx = await context();
+  ctx.openPort = null;                    // no Web Serial: paste is the only way in
+  const root = fakeRoot([field('paste', CLEAN)]);
+  await mountFeeds(root, ctx);
+
+  await root.fire('click', button('paste'));
+
+  const records = await ctx.store.allRecords();
+  assert.equal(records.length, 3);
+  assert.ok(records.every((r) => r.state === 'proposal'));
+  assert.match(root.innerHTML, /3 beads on the totem/);
+});
+
+test('a renamed mask is what gets written, and the untouched one survives', async () => {
+  const ctx = await totemCtx(totemReply);
+  const root = fakeRoot();
+  await mountFeeds(root, ctx);
+  await root.fire('click', button('connect'));
+  await root.fire('click', button('pull'));          // arms the wardrobe, reads two masks
+
+  root.fields = [field('maskName:0', 'arthouse'), field('maskColour:0', '#0d1f2d')];
+  await root.fire('click', button('wardrobe-save'));
+
+  // `M` is a full replace, so the whole wardrobe travels: the edited mask with
+  // its new name and colour, and `gig` exactly as it came off the device.
+  assert.equal(ctx.written.at(-1), 'arthouse|13|31|45\ngig|200|40|90\n.\n');
 });

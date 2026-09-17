@@ -75,15 +75,24 @@ export async function openLoom({ store, registry, now = () => Date.now(), newDev
     if (problems.length) throw new InvalidRecord(problems);
   }
 
-  /* `at` is the moment of the save: the record's updatedAt, and the time its body records. */
-  async function create(key, type, body, at) {
+  /* `at` is the moment of the save: the record's updatedAt, and the time its
+   * body records. The options name every field a caller may set — identity and
+   * stamps are this function's alone, so they cannot be passed in.
+   *
+   * That whitelist is defence-in-depth for a caller added later INSIDE this
+   * module: every public path (createBead, createStrand, adoptBead) already
+   * names its own arguments, so no test can reach create() with arbitrary
+   * options, and none pretends to. */
+  async function create(key, type, body, at,
+    { state = 'kept', origin = 'loom', sourceApp = 'loom', dedupeKey = null } = {}) {
     check(type, body);
     if (await store.getRecord(key)) throw new Error(`${key} already exists`);
     const env = {
-      key, type, rkey: key.slice(type.length + 1), body, state: 'kept', origin: 'loom', sourceApp: 'loom',
+      key, type, rkey: key.slice(type.length + 1), body, state, origin, sourceApp,
       createdAt: body.createdAt, updatedAt: at, hlc: await stamp(), deviceId,
       day: dayOf(type, body, body.createdAt),
     };
+    if (dedupeKey) env.dedupeKey = dedupeKey;
     await store.putRecord(env);
     await store.deleteMeta(`draft:${key}`);
     return env;
@@ -149,6 +158,20 @@ export async function openLoom({ store, registry, now = () => Date.now(), newDev
     createStrand(key, body) {
       const at = iso();
       return create(key, STRAND, { ...body, $type: STRAND, createdAt: at, items: list(body.items) }, at);
+    },
+
+    /* A bead minted on a device and pulled in over serial. It arrives whole
+     * and already triaged on the device, so its body — provenance included —
+     * is the device's own, not Loom's. It lands as a `proposal`: the dotted
+     * rail in the String column is the review, kept or released in place.
+     *
+     * `dedupeKey` is the device's own identity for the bead (`cb:…`), carried
+     * so Send posts it instead of `loom:<rkey>` and the String dedupes it
+     * against anything Studio pushed. Validated like any other write: unlike
+     * an import, this record is not on the String yet. */
+    adoptBead(key, body, { dedupeKey = null, sourceApp = 'culturebloc-totem' } = {}) {
+      return create(key, BEAD, body, iso(),
+        { state: 'proposal', origin: 'connector:totem', sourceApp, dedupeKey });
     },
     save,
 

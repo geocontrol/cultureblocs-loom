@@ -17,8 +17,13 @@ Three decisions taken up front, which everything below follows from:
    own repository. Loom works completely with no String at all.
 2. **Credentials sync across devices**, encrypted with a key the String
    never sees — with one honest exception, named in §5.
-3. **Nothing is retired.** Timeline, Studio, Pocket and Easel keep
-   running. Loom is built alongside; daily use decides the rest.
+3. **Almost nothing is retired.** Timeline, Pocket and Easel keep
+   running; Loom is built alongside and daily use decides the rest.
+   *Studio is the one exception, retired in 2026-09 once Loom took Web
+   Serial and the totem sync ([spec](docs/superpowers/specs/2026-09-17-loom-totem-sync-design.md)).
+   The totem has no network path by construction, so a browser holding
+   the serial port is the only way in, and two apps holding it was one
+   too many.*
 
 ---
 
@@ -123,7 +128,7 @@ Pocket, because the OAuth client id must be a stable URL).
     │   String column   calendar, the entries newest first, filter, proposals
     │   Editor          a whole bead or a whole strand, in one form
     │   Send            every change for the String: new, edited, kept, deleted
-    ├ Feeds ─────────── connectors, their last run, their proposals
+    ├ Feeds ─────────── connectors, their last run, their proposals — the totem today
     ├ Vault ─────────── identities, connector credentials, devices
     └ Publish ───────── what is public, what has drifted, what to send
 
@@ -254,7 +259,7 @@ and when two-device editing actually hurts.
 ## 5 · Sync: the String as a personal sync server
 
 Four changes to the String. None of them break the existing API, so
-timeline, Studio, Pocket and the workers keep working throughout.
+timeline, Pocket and the workers keep working throughout.
 
 ### 5.1 Discovery — no more typing a URL and a token
 
@@ -432,6 +437,7 @@ of missing history.
 | Connector | Produces | Notes |
 |---|---|---|
 | Last.fm | `listen` beads | exists; port first |
+| Totem | `bloc` / `encounter` beads | Web Serial over USB; exists; ported from Studio, which retires with it |
 | Booking mail | `booking` beads | ROADMAP §2; JSON-LD `EventReservation` in most confirmations. Future tense — the stub before the show |
 | Browser extension | `note` beads with links | the del.icio.us gesture; posts to Loom's local store via the same grant model |
 | Letterboxd / Trakt | `watch` beads | RSS is enough; no credential class beyond a username |
@@ -440,13 +446,18 @@ of missing history.
 The calendar row matters: a connector is allowed to be *context only*.
 Not every feed has to produce a record.
 
-That makes three connector classes, named in the manifest's `produces`:
+That makes four connector classes, named in the manifest's `produces`:
 
 - **produces records** — Last.fm, booking mail, Letterboxd.
 - **context only** — calendar.
 - **proposes refs** — the resolver (§9.2). It reads records rather than
   minting them, and its output lives in the resolver cache until a
   person keeps a ref. The review queue gains a refs tab.
+- **a device** — the totem. No schedule and no credential: it runs when
+  hardware is attached. The sync is a ritual rather than a poll (pull,
+  store, clear), and the clear is gated on a count the device itself
+  checks, so the connector's contract is with a cable rather than an
+  API.
 
 ---
 
@@ -830,10 +841,11 @@ authority lookups and refs rail land here too — they *are* a connector.
 round trip.
 
 **Phase 5 — decide by use.** After a season of daily use, ask what
-timeline and Pocket are still for. Studio keeps Web Serial; Easel keeps
-the diary/publishing separation the ROADMAP draws. Retire nothing on
-argument alone. Ask too whether subject versus mention survived contact
-with real use, and whether anyone ever touched the backfill queue.
+timeline and Pocket are still for. Studio is gone — Loom took Web
+Serial (§7). Easel keeps the diary/publishing separation the ROADMAP
+draws. Retire nothing on argument alone. Ask too whether subject versus
+mention survived contact with real use, and whether anyone ever
+touched the backfill queue.
 
 ---
 

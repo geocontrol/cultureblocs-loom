@@ -12,7 +12,7 @@ const str = (v) => (typeof v === 'string' ? v : '');
  * A record in conflict waits for the person; a Phase 1 draft never sent stays home. */
 export async function pendingChange(r) {
   if (r.conflict) return null;
-  if (!r.stringId) return r.deleted || r.state === 'draft' ? null : 'new';
+  if (!r.stringId) return r.deleted || r.state === 'draft' || r.state === 'proposal' ? null : 'new';
   if (r.deleted) return 'delete';
   if ((await contentHash(r.body)) !== r.importedHash) return 'edit';
   if (r.state !== r.importedState) return 'state';

@@ -23,7 +23,9 @@ import { stringPublisher } from './lib/publisher.js';
 import { phase1Redirect, routeSerializer } from './lib/routing.js';
 import { openStore } from './lib/store.js';
 import { stringClient } from './lib/string-client.js';
+import { hasSerial, openPort } from './lib/totem-port.js';
 import { mountEditor } from './ui/editor.js';
+import { mountFeeds } from './ui/feeds.js';
 import { mountDay, mountSend, mountTopbar } from './ui/pages.js';
 import { mountSettings } from './ui/settings.js';
 import { mountString } from './ui/string.js';
@@ -67,6 +69,9 @@ async function boot() {
       return stringPublisher({ store, client: stringClient(url, await store.getMeta('stringToken'), ctx.fetch) });
     },
     navigate: (hash) => { location.hash = hash; },
+    /* A connected totem port, or null when this browser has no Web Serial.
+     * The desk asks for a port and does not know what it is. */
+    openPort: hasSerial() ? (opts) => openPort(opts) : null,
     setDirty: (d) => { dirty = d; },
     async persisted() { return (await navigator.storage?.persisted?.()) ?? false; },
     async photoUrls(names) {
@@ -137,6 +142,8 @@ async function boot() {
       current.keep(await mountEditor(pane, ctx, { key: arg, day: params.get('day') || '', isNew: params.get('new') === '1' }), mounted);
     } else if (surface === 'send') {
       current.keep(await mountSend(pane, ctx), mounted);
+    } else if (surface === 'feeds') {
+      current.keep(await mountFeeds(pane, ctx), mounted);
     } else if (surface === 'settings') {
       current.keep(await mountSettings(pane, ctx), mounted);
     } else {
