@@ -11,7 +11,7 @@ The four surfaces in `LOOM.md` §3 sort them: **Feeds** takes 1 and 5,
 
 | # | Item | Surface | Status |
 |---|---|---|---|
-| 1 | Totem beads into Loom, in place | Feeds | new; no automatic path exists anywhere |
+| 1 | Totem beads into Loom, in place | Feeds | **done** 2026-09 |
 | 2 | Publish a strand to Instagram | Publish | new; same feature as 4 |
 | 3 | A wall of my published blocs | *not Loom* | new; two partial precedents |
 | 4 | Publish a strand to Bluesky, Mastodon, … | Publish | new; same feature as 2 |
@@ -20,6 +20,12 @@ The four surfaces in `LOOM.md` §3 sort them: **Feeds** takes 1 and 5,
 ---
 
 ## 1 · Totem beads into Loom, without switching windows
+
+**Done**, 2026-09 — [spec](superpowers/specs/2026-09-17-loom-totem-sync-design.md),
+[plan](superpowers/plans/2026-09-17-loom-totem-sync.md). Built as a fourth
+connector class on a minimal Feeds surface; Studio retired; the Cardputer's
+sync path ended with it. The open questions below were resolved as recorded in
+the spec's §2.
 
 **Ask.** Get beads off the ESP32 / M5StickS3 Totem into Loom without leaving
 the desk.
