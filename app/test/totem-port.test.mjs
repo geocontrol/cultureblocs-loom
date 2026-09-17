@@ -49,3 +49,13 @@ test('hasSerial reports whether this browser can talk to a device at all', () =>
   assert.equal(hasSerial({}), false);
   assert.equal(hasSerial({ serial: {} }), true);
 });
+
+test('a second read sees the bytes that followed the first marker, losing none', async () => {
+  // One reply carrying two markers: the carry-over the module promises.
+  const f = fakeSerial({ reply: () => 'AAA---END---BBB---END---' });
+  const port = await openPort({ serial: f.serial });
+  await port.send('X');
+  assert.equal(await port.readUntil('---END---', { timeoutMs: 200 }), 'AAA---END---');
+  assert.equal(await port.readUntil('---END---', { timeoutMs: 200 }), 'BBB---END---');
+  await port.close();
+});

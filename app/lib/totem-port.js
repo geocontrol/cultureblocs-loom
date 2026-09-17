@@ -14,7 +14,7 @@ export const hasSerial = (nav = globalThis.navigator) => Boolean(nav && nav.seri
 export async function openPort({ serial = globalThis.navigator?.serial, baudRate = 115200 } = {}) {
   if (!serial) throw new PortError('this browser has no Web Serial');
   const port = await serial.requestPort();
-  await port.open({ baudRate });
+  await port.open({ baudRate, dataBits: 8, parity: 'none', stopBits: 1 });
   const reader = port.readable.getReader();
   const writer = port.writable.getWriter();
   const decoder = new TextDecoder();
@@ -60,7 +60,8 @@ export async function openPort({ serial = globalThis.navigator?.serial, baudRate
       }
     },
     async close() {
-      try { reader.releaseLock(); writer.releaseLock(); } catch { /* already gone */ }
+      try { reader.releaseLock(); } catch { /* already gone */ }
+      try { writer.releaseLock(); } catch { /* already gone */ }
       try { await port.close(); } catch { /* already gone */ }
     },
   };
