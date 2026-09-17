@@ -628,9 +628,9 @@ test('with no String configured a strand shows no publishing surface', async () 
 /* The Feeds controller. `ctx.openPort` is the seam: the desk asks for a port
  * and does not know it is Web Serial. */
 import { mountFeeds } from '../ui/feeds.js';
-import { CLEAN, CLEAR_OK } from './fixtures/totem-dumps.mjs';
+import { CLEAN, CLEAR_OK, WARDROBE } from './fixtures/totem-dumps.mjs';
 import { fakeSerial } from './fake-serial.mjs';
-import { openPort } from '../lib/totem-port.js';
+import { openPort, PortError } from '../lib/totem-port.js';
 
 const totemCtx = async (reply) => {
   const ctx = await context();
@@ -641,8 +641,18 @@ const totemCtx = async (reply) => {
   return ctx;
 };
 
+/* Answers each command the way the device would. Replying to everything with
+ * the bead dump leaves readWardrobe waiting out its own timeout. */
+const totemReply = (cmd) => {
+  const c = cmd.trim();
+  if (c === 'D') return CLEAN;
+  if (c === 'W') return WARDROBE;
+  if (c.startsWith('C')) return CLEAR_OK;
+  return '';
+};
+
 test('Feeds offers connect, then pulls the totem’s beads in as proposals', async () => {
-  const ctx = await totemCtx(() => CLEAN);
+  const ctx = await totemCtx(totemReply);
   const root = fakeRoot();
   await mountFeeds(root, ctx);
   assert.match(root.innerHTML, /data-action="connect"/);
@@ -658,7 +668,7 @@ test('Feeds offers connect, then pulls the totem’s beads in as proposals', asy
 });
 
 test('the clear is offered after a clean pull and sends the device’s own count', async () => {
-  const ctx = await totemCtx((cmd) => (cmd.trim().startsWith('C') ? CLEAR_OK : CLEAN));
+  const ctx = await totemCtx(totemReply);
   const root = fakeRoot();
   await mountFeeds(root, ctx);
   await root.fire('click', button('connect'));
@@ -672,8 +682,16 @@ test('the clear is offered after a clean pull and sends the device’s own count
 
 test('a sleeping totem is reported in words, and nothing is written', async () => {
   const ctx = await context();
-  const f = fakeSerial({ neverAnswers: true });
-  ctx.openPort = () => openPort({ serial: f.serial });
+  // The port's own 8s timeout is covered in totem-port.test.mjs; here we only
+  // need the controller to surface the failure, so the port rejects at once
+  // rather than making the suite wait for it.
+  ctx.openPort = async () => ({
+    async send() {},
+    async readUntil() {
+      throw new PortError('the totem didn’t answer — wake it with a button press and pull again');
+    },
+    async close() {},
+  });
   const root = fakeRoot();
   await mountFeeds(root, ctx);
   await root.fire('click', button('connect'));
