@@ -683,6 +683,24 @@ test('publish sends the ticked destination and the text as edited, then says it 
   assert.ok(!root.innerHTML.includes('name="postText"'), 'the text box goes once nothing is ticked');
 });
 
+test('a refused publish keeps the ticked destination and the typed text', async () => {
+  const ctx = await context();
+  const p = fakePublisher({ store: ctx.store, destinations: [BLUESKY],
+    fail: 'post text is 301 characters; the most every chosen destination takes is 300' });
+  const key = await strandOnString(ctx, p);
+  const root = fakeRoot();
+  await mountEditor(root, ctx, { key });
+
+  await root.fire('input', tick('bluesky'));
+  await root.fire('input', publishInput('postText', 'x'.repeat(301)));
+  await root.fire('click', button('publish'));
+
+  assert.match(root.innerHTML, /post text is 301 characters/);
+  assert.match(root.innerHTML, /name="destination" value="bluesky" checked/);
+  assert.match(root.innerHTML, new RegExp(`<textarea name="postText"[^>]*>${'x'.repeat(301)}</textarea>`));
+  assert.equal((await ctx.store.getRecord(key)).publishedUri, undefined);
+});
+
 test('unticking takes the destination back out of the publish', async () => {
   const ctx = await context();
   const p = fakePublisher({ store: ctx.store, destinations: [BLUESKY] });
