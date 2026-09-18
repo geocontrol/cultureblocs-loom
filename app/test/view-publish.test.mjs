@@ -48,6 +48,13 @@ test('a single identity needs no picker', () => {
   assert.ok(!view({ record: strand() }).includes('<select name="identity"'));
 });
 
+test('the chosen identity keeps its selected option', () => {
+  const html = view({ record: strand(),
+    identities: [...IDENTITIES, { name: 'work', handle: 'work.example' }], identity: 'work' });
+  assert.match(html, /<option value="work" selected>work\.example<\/option>/);
+  assert.ok(!/<option value="personal"[^>]* selected/.test(html));
+});
+
 test('while publishing, the buttons are disabled and the wait is explained', () => {
   const html = view({ record: strand(), busy: true });
   assert.match(html, /disabled/);
@@ -109,6 +116,14 @@ test('a destination already used is a link to the post, not a checkbox', () => {
   assert.ok(!html.includes('value="bluesky"'), 'no second chance to double-post');
 });
 
+test('a non-http(s) remoteUrl is shown as a chip, not a link', () => {
+  const html = view({ record: strand({ publishedUri: 'at://x/s/1',
+    syndications: [{ destination: 'bluesky', remoteUrl: 'javascript:alert(1)', postedAt: 't' }] }),
+  destinations: [BLUESKY] });
+  assert.ok(!html.includes('<a'), 'no link for a non-http(s) URL');
+  assert.match(html, /<span class="chip published">posted to Bluesky<\/span>/);
+});
+
 test('with no destinations on offer the block is exactly as before', () => {
   const html = view({ record: strand(), destinations: [] });
   assert.ok(!html.includes('name="destination"'));
@@ -135,10 +150,21 @@ test('syndicationNotice says what happened to each destination', () => {
   assert.equal(syndicationNotice([]), '');
   assert.equal(syndicationNotice(undefined), '');
   assert.equal(syndicationNotice([{ destination: 'bluesky', status: 'posted', droppedImages: 0 }]), 'Posted to Bluesky.');
+  assert.equal(syndicationNotice([{ destination: 'bluesky', status: 'posted', droppedImages: 1 }]),
+    'Posted to Bluesky (1 image left out).');
   assert.equal(syndicationNotice([{ destination: 'bluesky', status: 'posted', droppedImages: 2 }]),
-    'Posted to Bluesky (2 images left out: it takes four).');
+    'Posted to Bluesky (2 images left out).');
   assert.equal(syndicationNotice([{ destination: 'bluesky', status: 'already' }]),
     'Already posted to Bluesky, so not posted again.');
   assert.equal(syndicationNotice([{ destination: 'bluesky', status: 'failed', reason: 'bsky is down' }]),
     'Published, but Bluesky failed: bsky is down. It can be tried again.');
+});
+
+test('syndicationNotice appends a warning from a posted result', () => {
+  assert.equal(syndicationNotice([{ destination: 'bluesky', status: 'posted', droppedImages: 0,
+    warning: 'the String could not record it' }]),
+  'Posted to Bluesky, but the String could not record it.');
+  assert.equal(syndicationNotice([{ destination: 'bluesky', status: 'posted', droppedImages: 2,
+    warning: 'do not post it again' }]),
+  'Posted to Bluesky (2 images left out), but do not post it again.');
 });

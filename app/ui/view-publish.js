@@ -34,12 +34,17 @@ export function syndicationNotice(results = []) {
   return (results || []).map((r) => {
     const name = destinationLabel(r.destination);
     if (r.status === 'posted') {
-      return r.droppedImages ? `Posted to ${name} (${r.droppedImages} images left out: it takes four).` : `Posted to ${name}.`;
+      const n = r.droppedImages || 0;
+      const dropped = n ? ` (${n} image${n === 1 ? '' : 's'} left out)` : '';
+      const warning = r.warning ? `, but ${r.warning}` : '';
+      return `Posted to ${name}${dropped}${warning}.`;
     }
     if (r.status === 'already') return `Already posted to ${name}, so not posted again.`;
     return `Published, but ${name} failed: ${r.reason}. It can be tried again.`;
   }).join(' ');
 }
+
+const HTTP_URL = /^https?:\/\//;
 
 /* The "also post to" part: a link for each destination already used, a
  * checkbox for each one not yet, and — once one is ticked — the post text. */
@@ -49,7 +54,7 @@ function destinationsView(record, destinations, ticked, postText, limit) {
   return html`<fieldset class="destinations">
     <legend>Also post to</legend>
     ${destinations.map((d) => (used.has(d.name)
-    ? html`<p class="chip-line">${used.get(d.name).remoteUrl
+    ? html`<p class="chip-line">${HTTP_URL.test(used.get(d.name).remoteUrl || '')
       ? html`<a class="posted" href="${used.get(d.name).remoteUrl}" target="_blank" rel="noopener">posted to ${destinationLabel(d.name)}</a>`
       : html`<span class="chip published">posted to ${destinationLabel(d.name)}</span>`}</p>`
     : html`<label><input type="checkbox" name="destination" value="${d.name}"${ticked.includes(d.name) ? raw(' checked') : ''}>
@@ -62,8 +67,8 @@ function destinationsView(record, destinations, ticked, postText, limit) {
   </fieldset>`;
 }
 
-/* state: { record, identities, busy, error, destinations, ticked, postText, notice } */
-export function publishView({ record = null, identities = [], busy = false, error = '',
+/* state: { record, identities, identity, busy, error, destinations, ticked, postText, notice } */
+export function publishView({ record = null, identities = [], identity = null, busy = false, error = '',
   destinations = [], ticked = [], postText = '', notice = '' } = {}) {
   if (record?.type !== STRAND) return html`${''}`;   // a bead goes public with its strand
   const why = whyNotPublishable(record);
@@ -102,7 +107,7 @@ export function publishView({ record = null, identities = [], busy = false, erro
     ${one
     ? html`<p class="hint">as <strong>${one.handle || one.name}</strong></p>`
     : html`<label>publish as <select name="identity">
-        ${identities.map((i) => html`<option value="${i.name}">${i.handle || i.name}</option>`)}
+        ${identities.map((i) => html`<option value="${i.name}"${i.name === identity ? raw(' selected') : ''}>${i.handle || i.name}</option>`)}
       </select></label>`}
     ${destinationsView(record, destinations, ticked, postText, limit)}
     <div class="row">
