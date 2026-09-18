@@ -20,7 +20,7 @@ import { mediaNames, putPhoto } from '../lib/media.js';
 import { beadFormView } from './view-bead.js';
 import { bodyFromFields, fromLocalInput, problemsView, readOnlyView } from './view-form.js';
 import { conflictView, deleteView, deletedView } from './view-panels.js';
-import { publishView } from './view-publish.js';
+import { counterView, postLimit, postReady, publishView, syndicationNotice } from './view-publish.js';
 import { publishHint, refFromFields } from './view-refs.js';
 import { strandFormView } from './view-strand.js';
 import { errorLine, html, surfaceErrors } from './html.js';
@@ -61,8 +61,15 @@ export async function mountEditor(root, ctx, { key, day = '', isNew = false }) {
   const text = () => state.body[textField(type)] || '';
 
   /* Publishing, asked for once when a strand opens: `available` is false when
-   * no String is configured, and the surface then stays hidden entirely. */
-  const publish = { identities: [], error: '', busy: false, available: false };
+   * no String is configured, and the surface then stays hidden entirely.
+   * `identity` holds the chosen identity's name across re-renders — a tick
+   * re-renders the whole block, and a bare <select> has no memory of its own.
+   * `ticked` and `postText` are the syndication choices for the next press;
+   * `postText` is null until a destination is first ticked, when it freezes
+   * to the title at that moment (so editing the title afterwards doesn't
+   * change what gets sent), or until someone types over it. */
+  const publish = { identities: [], identity: null, destinations: [], ticked: [], postText: null,
+    notice: '', error: '', busy: false, available: false };
 
   async function loadPublishing() {
     if (type !== STRAND || !ctx.publisher) return;
@@ -71,10 +78,19 @@ export async function mountEditor(root, ctx, { key, day = '', isNew = false }) {
     publish.available = true;
     try {
       publish.identities = await publisher.identities();
+      if (!publish.identity && publish.identities.length) publish.identity = publish.identities[0].name;
     } catch (err) {
       publish.error = err?.message || String(err);
+      return;
+    }
+    try {
+      publish.destinations = (await publisher.destinations?.()) || [];
+    } catch {
+      publish.destinations = [];
     }
   }
+
+  const postText = () => publish.postText ?? (state.body.title || '');
 
   /* The String puts its refusal in `detail`; the message is only the status. */
   const reason = (err) => {
@@ -121,7 +137,9 @@ export async function mountEditor(root, ctx, { key, day = '', isNew = false }) {
     const form = view({ ...state, record, problems: problems(), locked: Boolean(record?.deleted) });
     const confirm = state.confirmDelete ? deleteView({ record, ...state.confirmDelete }) : '';
     const publishing = publish.available && !record?.deleted
-      ? publishView({ record, identities: publish.identities, busy: publish.busy, error: publish.error })
+      ? publishView({ record, identities: publish.identities, identity: publish.identity, busy: publish.busy,
+        error: publish.error, destinations: publish.destinations, ticked: publish.ticked,
+        postText: postText(), notice: publish.notice })
       : '';
     root.innerHTML = String(html`${status}<p class="back"><a href="#/day/${record?.day || ''}">back</a></p>${conflict}${form}${publishing}${confirm}`);
   }
@@ -187,7 +205,32 @@ export async function mountEditor(root, ctx, { key, day = '', isNew = false }) {
     return f;
   }
 
+  /* Input inside the Publishing block: a destination ticked or unticked, the
+   * identity chosen, or the post text typed. Never part of the strand's
+   * body, never a draft. */
+  function onPublishInput(el) {
+    if (el.name === 'destination') {
+      const rest = publish.ticked.filter((d) => d !== el.value);
+      publish.ticked = el.checked ? [...rest, el.value] : rest;
+      if (el.checked && publish.postText === null) publish.postText = state.body.title || '';
+      return render();
+    }
+    if (el.name === 'identity') {
+      publish.identity = el.value;
+      return undefined;
+    }
+    if (el.name === 'postText') {
+      publish.postText = el.value;
+      const limit = postLimit(publish.destinations, publish.ticked);
+      const slot = root.querySelector('.post-counter');
+      if (slot) slot.innerHTML = String(counterView(publish.postText, limit));
+      root.querySelectorAll('button[data-action="publish"]').forEach((b) => { b.disabled = publish.busy || !postReady(publish.postText, limit); });
+    }
+    return undefined;
+  }
+
   function onInput(e) {
+    if (e.target.closest?.('section.publish')) return onPublishInput(e.target);
     if (record?.deleted) return;                      // the form is shown read-only
     if (e.target.type === 'file' || e.target.closest?.('form.editor') === null) return;
     if (e.target.name === 'when') anchored = false;
@@ -277,19 +320,30 @@ export async function mountEditor(root, ctx, { key, day = '', isNew = false }) {
   };
   if (type === STRAND && ctx.desk) ctx.desk.tick = tick;
 
-  /* Publish or unpublish this strand, as the chosen identity. The request is
-   * slow, so the surface goes busy first; the record is re-read afterwards
-   * because the publisher stamps the public URI on it. */
+  /* Publish or unpublish this strand, as the chosen identity, and post it to
+   * whatever is ticked. The request is slow, so the surface goes busy first;
+   * the record is re-read afterwards because the publisher stamps the public
+   * URI, and where it was posted, on it. */
   async function goPublic(action) {
     const publisher = await ctx.publisher?.();
     if (!publisher) return;
-    const chosen = root.querySelector?.('select[name="identity"]')?.value
+    const chosen = publish.identity
+      || root.querySelector?.('select[name="identity"]')?.value
       || publish.identities[0]?.name;
     publish.busy = true;
+    publish.notice = '';
     await render();
     try {
-      if (action === 'publish') await publisher.publish(key, chosen);
-      else await publisher.unpublish(key, chosen);
+      if (action === 'publish') {
+        const destinations = [...publish.ticked];
+        const result = await publisher.publish(key, chosen,
+          destinations.length ? { destinations, postText: postText() } : {});
+        publish.notice = syndicationNotice(result?.syndications);
+        publish.ticked = [];
+        publish.postText = null;
+      } else {
+        await publisher.unpublish(key, chosen);
+      }
       record = await ctx.store.getRecord(key);
       changed();
     } catch (err) {
@@ -381,9 +435,12 @@ export async function mountEditor(root, ctx, { key, day = '', isNew = false }) {
   }
 
   const show = async (message) => { state.error = message; await render(); };
+  // Wrapped like click/change: a tick's render() rejecting must not become an
+  // unhandled rejection.
+  const input = surfaceErrors(onInput, show);
   const click = surfaceErrors(onClick, show), change = surfaceErrors(onChange, show);
   const submit = (e) => e.preventDefault();       // no inline handler: the CSP forbids them
-  root.addEventListener('input', onInput);
+  root.addEventListener('input', input);
   root.addEventListener('click', click);
   root.addEventListener('change', change);
   root.addEventListener('submit', submit);
@@ -413,7 +470,7 @@ export async function mountEditor(root, ctx, { key, day = '', isNew = false }) {
     },
     flush,
     unmount() {
-      root.removeEventListener('input', onInput);
+      root.removeEventListener('input', input);
       root.removeEventListener('click', click);
       root.removeEventListener('change', change);
       root.removeEventListener('submit', submit);

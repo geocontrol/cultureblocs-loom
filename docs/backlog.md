@@ -12,9 +12,9 @@ The four surfaces in `LOOM.md` §3 sort them: **Feeds** takes 1 and 5,
 | # | Item | Surface | Status |
 |---|---|---|---|
 | 1 | Totem beads into Loom, in place | Feeds | **done** 2026-09 |
-| 2 | Publish a strand to Instagram | Publish | new; same feature as 4 |
+| 2 | Publish a strand to Instagram | Publish | **seam built** 2026-09 — the adapter is a later module |
 | 3 | A wall of my published blocs | *not Loom* | new; two partial precedents |
-| 4 | Publish a strand to Bluesky, Mastodon, … | Publish | new; same feature as 2 |
+| 4 | Publish a strand to Bluesky, Mastodon, … | Publish | **done** 2026-09 for Bluesky |
 | 5 | Extract works / people / events from prose | Feeds | **already designed** (§9); unbuilt |
 
 ---
@@ -86,6 +86,15 @@ credential, runs when hardware is attached.
 ---
 
 ## 2 & 4 · Publishing routes: syndication to other services
+
+**Done for Bluesky**, 2026-09 — [spec](superpowers/specs/2026-09-18-publish-destinations-design.md),
+[plan](superpowers/plans/2026-09-18-publish-destinations.md). Syndication runs
+in the String as a second phase of `POST /publish/<id>`, one module per
+destination behind a registry. Bluesky reuses the publish's session and
+blobs. No link back yet: there is no per-strand permalink anywhere, so it
+arrives with the wall (item 3). Instagram, Mastodon and Threads are each one
+new module in `string/app/syndicate/`; Instagram's frictions below still
+stand.
 
 These are one feature, so they are one entry. **Everything goes to the PDS;
 some of it is then syndicated elsewhere, always with a link back.** (The

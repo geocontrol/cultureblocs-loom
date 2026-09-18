@@ -468,6 +468,21 @@ Easel and Pocket already do, using the OAuth session — so the String is
 not required in order to publish, and a Loom user with no String at all
 still has the full loop.
 
+**Everything goes to the PDS; some of it is then syndicated.** The PDS is
+where a record lives, and other services get renderings of it — POSSE, in
+the IndieWeb's word. Each destination is a deliberate tick on the
+Publishing block, never a default. One press does one intent: the strand
+publishes, then each ticked destination gets a short post whose text is
+written by hand (it starts as the strand's title) and sent as written.
+Each destination is posted to **once** per strand — the String's
+`syndications` table enforces it, so republishing never double-posts — and
+unpublishing a strand does not delete its posts, because a post is a
+moment that happened. Bluesky is the first destination; Instagram,
+Mastodon and Threads are later modules behind the same seam
+([design](docs/superpowers/specs/2026-09-18-publish-destinations-design.md)).
+The client-side ambition below is unaffected: `app/lib/publisher.js` stays
+the swap point, and syndication sits behind it as publishing does.
+
 - One canonical strip in `loom/lib/strip.js`, fixture-tested against
   `publisher.py` (R5).
 - Drift against `publishedCanonical`, exactly Easel's model — the

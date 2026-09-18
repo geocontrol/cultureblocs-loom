@@ -334,3 +334,18 @@ test('a record unpublished on the String stops reading as published here', async
 
   assert.equal((await store.getRecord(`${B}/u1`)).publishedUri, null);
 });
+
+test('import carries where a strand was posted, so the desk can link to it', async () => {
+  const posted = [{ destination: 'bluesky', remoteId: '3p', remoteUrl: 'https://bsky.app/profile/me/post/3p', postedAt: '2026-09-18T12:00:00Z' }];
+  const s = fakeString({ records: [
+    bead('u1', 'public', { publishedUri: 'at://did:plc:x/com.cultureblocs.bead/b1', syndications: posted }),
+    bead('u2', 'private'),
+  ] });
+  const store = createMemStore();
+  await runImport({ store, registry: await registry(), client: s.client });
+
+  assert.deepEqual((await store.getRecord(`${B}/u1`)).syndications,
+    [{ destination: 'bluesky', remoteUrl: 'https://bsky.app/profile/me/post/3p', postedAt: '2026-09-18T12:00:00Z' }]);
+  assert.deepEqual((await store.getRecord(`${B}/u2`)).syndications, [],
+    'a String that says "none" reads as none, not as unknown');
+});
