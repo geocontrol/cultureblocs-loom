@@ -6,7 +6,8 @@ import { mediaName, sha256Hex } from '../lib/media.js';
 import { StringError } from '../lib/string-client.js';
 
 export function fakeString({ records = [], media = {}, failMedia = new Set(), reject = {},
-  identities = [{ name: 'personal', handle: 'someone.example', pds: 'https://bsky.social' }] } = {}) {
+  identities = [{ name: 'personal', handle: 'someone.example', pds: 'https://bsky.social' }],
+  destinations = [{ name: 'bluesky', limits: { text: 300, images: 4, wants_link: false } }] } = {}) {
   let n = 0, clock = 0;
   const posted = [];
   const calls = [];
@@ -99,19 +100,37 @@ export function fakeString({ records = [], media = {}, failMedia = new Set(), re
       calls.push('listIdentities');
       return structuredClone(identities);
     },
-    /* The String publishes to the PDS and stamps `publishedUri` on the record. */
-    async publish(id, identity) {
+    async listDestinations() {
+      reach('/destinations');
+      calls.push('listDestinations');
+      return structuredClone(destinations);
+    },
+    /* The String publishes to the PDS and stamps `publishedUri` on the record;
+     * then posts to each destination not already used, keeping one row each. */
+    async publish(id, identity, { destinations: chosen = [], postText } = {}) {
       const path = `/publish/${id}`;
       reach(path);
       calls.push(`publish ${id} ${identity}`);
       const rec = find(id, path);
       if (!identities.some((i) => i.name === identity)) throw fail(path, 404, 'unknown identity');
       if (out.failPublish) throw fail(path, 400, out.failPublish);
-      published.push({ id, identity });
+      published.push(chosen.length ? { id, identity, destinations: chosen, postText } : { id, identity });
       const uri = `at://did:plc:fake/${rec.type}/${id}`;
       rec.publishedUri = uri;
       const key = rec.type.endsWith('strand') ? 'strandUri' : 'uri';
-      return { identity, handle: 'someone.example', did: 'did:plc:fake', records: [uri], [key]: uri };
+      const result = { identity, handle: 'someone.example', did: 'did:plc:fake', records: [uri], [key]: uri };
+      if (!chosen.length) return result;
+      rec.syndications ??= [];
+      result.syndications = chosen.map((destination) => {
+        const had = rec.syndications.find((s) => s.destination === destination);
+        if (had) return { destination, status: 'already', remoteUrl: had.remoteUrl, postedAt: had.postedAt };
+        if (out.failSyndicate) return { destination, status: 'failed', reason: out.failSyndicate };
+        const row = { destination, remoteId: `${destination}-${id}`,
+          remoteUrl: `https://${destination}.example/post/${id}`, postedAt: '2026-09-18T12:00:00Z' };
+        rec.syndications.push(row);
+        return { destination, status: 'posted', remoteUrl: row.remoteUrl, postedAt: row.postedAt, droppedImages: 0 };
+      });
+      return result;
     },
     async unpublish(id, identity) {
       const path = `/unpublish/${id}`;
@@ -141,9 +160,9 @@ export function fakeString({ records = [], media = {}, failMedia = new Set(), re
     return structuredClone(rec);
   }
 
-  /* `failPublish` / `failUnpublish` are set by a test to make the String refuse. */
-  const out = { client, records, media, posted, calls, published, unpublished, identities,
-    editOnString, state, failPublish: null, failUnpublish: null };
+  /* `failPublish` / `failUnpublish` / `failSyndicate` are set by a test to make the String refuse. */
+  const out = { client, records, media, posted, calls, published, unpublished, identities, destinations,
+    editOnString, state, failPublish: null, failUnpublish: null, failSyndicate: null };
   return out;
 }
 

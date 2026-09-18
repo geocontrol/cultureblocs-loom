@@ -111,14 +111,32 @@ export function stringClient(baseUrl, token, fetchImpl = globalThis.fetch.bind(g
         ? null : 'expected { identities: [{ name, handle, pds }] }'));
       return body.identities;
     },
-    /* Publish a strand and the beads it lists, as `identity`. The String does
-     * the strip and talks to the PDS, inline: this is a slow request, and it
-     * is not atomic (see the Publish panel's notes). Re-publishing is how a
-     * half-finished publish is repaired — the rkeys are reused. */
-    async publish(id, identity) {
+    /* Where a published strand can also be posted: [{ name, limits }]. A 404
+     * is a String older than syndication, so it offers none — and Loom then
+     * publishes exactly as it did before — rather than failing the block. */
+    async listDestinations() {
+      let body;
+      try {
+        body = await json('/destinations', (b) => (Array.isArray(b?.destinations)
+          && b.destinations.every((d) => isObject(d) && typeof d.name === 'string' && isObject(d.limits))
+          ? null : 'expected { destinations: [{ name, limits }] }'));
+      } catch (e) {
+        if (e instanceof StringError && e.status === 404) return [];
+        throw e;
+      }
+      return body.destinations;
+    },
+    /* Publish a strand and the beads it lists, as `identity`, and post it to
+     * any `destinations` with `postText`. The String does the strip and talks
+     * to the PDS, inline: this is a slow request, and it is not atomic (see
+     * the Publish panel's notes). Re-publishing is how a half-finished publish
+     * is repaired — the rkeys are reused — and never posts twice. With no
+     * destinations the request is exactly what it always was. */
+    async publish(id, identity, { destinations = [], postText } = {}) {
+      const payload = destinations.length ? { identity, destinations, postText } : { identity };
       return json(`/publish/${encodeURIComponent(id)}`, (b) => (Array.isArray(b?.records)
         ? null : 'expected { records: [...] }'),
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identity }) });
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     },
     /* Withdraw a strand and its beads from the PDS. Returns how many went. */
     async unpublish(id, identity) {

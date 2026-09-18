@@ -149,3 +149,42 @@ test('an id with a slash or a space is escaped into the publish path', async () 
   await stringClient('http://string.test', '', f.impl).publish('a b/c', 'personal');
   assert.equal(f.seen[0].path, '/publish/a%20b%2Fc');
 });
+
+/* Destinations (publish-destinations spec §7). A String older than this
+ * answers 404, and Loom then offers none and publishes as it always has. */
+
+test('listDestinations returns what the String can post to, with limits', async () => {
+  const list = [{ name: 'bluesky', limits: { text: 300, images: 4, wants_link: false } }];
+  const f = scriptedFetch(() => [200, { destinations: list }]);
+  const c = stringClient('http://string.test', 't', f.impl);
+  assert.deepEqual(await c.listDestinations(), list);
+  assert.deepEqual(f.seen.map((r) => [r.method, r.path]), [['GET', '/destinations']]);
+});
+
+test('a String without /destinations offers none, rather than failing', async () => {
+  const c = stringClient('http://string.test', '', scriptedFetch(() => [404, { detail: 'Not Found' }]).impl);
+  assert.deepEqual(await c.listDestinations(), []);
+});
+
+test('listDestinations still fails loudly on anything but a 404', async () => {
+  const down = stringClient('http://string.test', '', scriptedFetch(() => [500, { detail: 'boom' }]).impl);
+  await assert.rejects(down.listDestinations(), (e) => e instanceof StringError && e.status === 500);
+  const wrong = stringClient('http://string.test', '', scriptedFetch(() => [200, { names: ['bluesky'] }]).impl);
+  await assert.rejects(wrong.listDestinations(), (e) => e instanceof StringError && /destinations/.test(e.message));
+});
+
+test('publish with destinations sends them and the post text alongside the identity', async () => {
+  const answer = { records: [], strandUri: 'at://x/s/1',
+    syndications: [{ destination: 'bluesky', status: 'posted', remoteUrl: 'https://bsky.app/profile/me/post/3p', postedAt: 't' }] };
+  const f = scriptedFetch(() => [200, answer]);
+  const c = stringClient('http://string.test', '', f.impl);
+  assert.deepEqual(await c.publish('sid-1', 'personal', { destinations: ['bluesky'], postText: 'A day out' }), answer);
+  assert.deepEqual(JSON.parse(f.seen[0].body), { identity: 'personal', destinations: ['bluesky'], postText: 'A day out' });
+});
+
+test('publish with no destinations sends exactly what it always did', async () => {
+  const f = scriptedFetch(() => [200, { records: [] }]);
+  const c = stringClient('http://string.test', '', f.impl);
+  await c.publish('sid-1', 'personal', { destinations: [], postText: 'ignored' });
+  assert.deepEqual(JSON.parse(f.seen[0].body), { identity: 'personal' });
+});
