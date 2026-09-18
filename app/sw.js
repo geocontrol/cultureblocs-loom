@@ -2,7 +2,7 @@
  * browsers keep serving the old one. A new version installs and waits; the
  * page tells it to take over once no edit is pending (loom.js). Requests to
  * other origins — the String — are never intercepted. */
-const VERSION = 'loom-5';
+const VERSION = 'loom-6';
 const SHELL = [
   './', './index.html', './loom.css', './loom.js', './manifest.webmanifest', './icon-192.png', './icon-512.png',
   './lib/anchors.js', './lib/backup.js', './lib/conflicts.js', './lib/day.js', './lib/envelope.js', './lib/hlc.js', './lib/images.js',
