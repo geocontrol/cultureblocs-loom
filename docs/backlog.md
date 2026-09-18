@@ -87,11 +87,6 @@ credential, runs when hardware is attached.
 
 ## 2 & 4 · Publishing routes: syndication to other services
 
-These are one feature, so they are one entry. **Everything goes to the PDS;
-some of it is then syndicated elsewhere, always with a link back.** (The
-IndieWeb calls this POSSE — publish on your own site, syndicate elsewhere.
-Worth borrowing the name.)
-
 **Done for Bluesky**, 2026-09 — [spec](superpowers/specs/2026-09-18-publish-destinations-design.md),
 [plan](superpowers/plans/2026-09-18-publish-destinations.md). Syndication runs
 in the String as a second phase of `POST /publish/<id>`, one module per
@@ -100,6 +95,11 @@ blobs. No link back yet: there is no per-strand permalink anywhere, so it
 arrives with the wall (item 3). Instagram, Mastodon and Threads are each one
 new module in `string/app/syndicate/`; Instagram's frictions below still
 stand.
+
+These are one feature, so they are one entry. **Everything goes to the PDS;
+some of it is then syndicated elsewhere, always with a link back.** (The
+IndieWeb calls this POSSE — publish on your own site, syndicate elsewhere.
+Worth borrowing the name.)
 
 **Ask.** After publishing a strand, optionally push it to Instagram (a
 carousel of the beads' photos, the text, an Atmosphere link, maybe a
