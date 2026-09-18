@@ -508,7 +508,7 @@ test('import from settings marks conflicts and says to open them', async () => {
  * a PDS over Loom's own OAuth session. */
 
 function fakePublisher({ store, identities = [{ name: 'personal', handle: 'someone.example' }],
-  destinations = [], syndicate = null, fail = null, failIdentities = null } = {}) {
+  destinations = [], syndicate = null, fail = null, failIdentities = null, failDestinations = null } = {}) {
   const done = [];
   // Stamps `publishedUri` as lib/publisher.js does, so the editor's re-read
   // afterwards sees what the real publisher would have left.
@@ -516,7 +516,7 @@ function fakePublisher({ store, identities = [{ name: 'personal', handle: 'someo
   return { done, identities,
     publisher: {
       async identities() { if (failIdentities) throw new Error(failIdentities); return identities; },
-      async destinations() { return destinations; },
+      async destinations() { if (failDestinations) throw new Error(failDestinations); return destinations; },
       async publish(key, identity, opts = {}) {
         if (fail) throw Object.assign(new Error('HTTP 400'), { status: 400, detail: fail });
         done.push(opts.destinations?.length
@@ -635,6 +635,17 @@ test('with no String configured a strand shows no publishing surface', async () 
   assert.ok(!root.innerHTML.includes('class="publish"'));
 });
 
+test('a /destinations failure does not block publishing', async () => {
+  const ctx = await context();
+  const p = fakePublisher({ store: ctx.store, failDestinations: 'unreachable (offline)' });
+  const key = await strandOnString(ctx, p);
+  const root = fakeRoot();
+
+  await mountEditor(root, ctx, { key });
+
+  assert.match(root.innerHTML, /data-action="publish"/);
+});
+
 const BLUESKY = { name: 'bluesky', limits: { text: 300, images: 4, wants_link: false } };
 
 /* An input inside the Publishing block (not the editor form). */
@@ -729,6 +740,36 @@ test('a failed destination is reported beside a publish that worked', async () =
   assert.match(root.innerHTML, /Published, but Bluesky failed: bsky is down/);
   assert.match(root.innerHTML, /name="destination" value="bluesky"/, 'still available to try again');
   assert.match(root.innerHTML, /data-action="unpublish"/, 'the strand itself is published');
+});
+
+test('ticking a destination keeps the identity chosen earlier, not the first one', async () => {
+  const ctx = await context();
+  const identities = [{ name: 'personal', handle: 'someone.example' }, { name: 'work', handle: 'work.example' }];
+  const p = fakePublisher({ store: ctx.store, identities, destinations: [BLUESKY] });
+  const key = await strandOnString(ctx, p);
+  const root = fakeRoot();
+  await mountEditor(root, ctx, { key });
+
+  await root.fire('input', publishInput('identity', 'work'));
+  await root.fire('input', tick('bluesky'));
+  await root.fire('click', button('publish'));
+
+  assert.deepEqual(p.done, [`publish ${key} as work to bluesky: A day out`]);
+});
+
+test('editing the title after ticking a destination does not change what is sent', async () => {
+  const ctx = await context();
+  const p = fakePublisher({ store: ctx.store, destinations: [BLUESKY] });
+  const key = await strandOnString(ctx, p);
+  const root = fakeRoot();
+  await mountEditor(root, ctx, { key });
+
+  await root.fire('input', tick('bluesky'));
+  root.fields = [field('title', 'A different day')];
+  await root.fire('input', field('title', 'A different day'));
+  await root.fire('click', button('publish'));
+
+  assert.deepEqual(p.done, [`publish ${key} as personal to bluesky: A day out`]);
 });
 
 test('typing in the Publishing block does not touch the strand being edited', async () => {
