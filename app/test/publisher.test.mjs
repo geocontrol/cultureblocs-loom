@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openLoom } from '../lib/envelope.js';
 import { createMemStore } from '../lib/memstore.js';
-import { stringPublisher, whyNotPublishable } from '../lib/publisher.js';
+import { stringPublisher, whyNotPublishable, mergeSyndications } from '../lib/publisher.js';
 import { fakeString } from './fake-string.mjs';
 import { makeBead, makeStrand, registry, steppingNow } from './helpers.mjs';
 
@@ -107,4 +107,64 @@ test('unpublish clears the public URI', async () => {
 test('the identities come from the String, which holds the app passwords', async () => {
   const { publisher } = await desk({ identities: [{ name: 'personal', handle: 'someone.example' }] });
   assert.deepEqual((await publisher.identities()).map((i) => i.name), ['personal']);
+});
+
+test("the publisher lists the String's destinations", async () => {
+  const d = await desk();
+  assert.deepEqual((await d.publisher.destinations()).map((x) => x.name), ['bluesky']);
+});
+
+test('publish with a destination sends it and the text, and the record learns where it went', async () => {
+  const d = await desk();
+  const key = await sentStrand(d);
+
+  const result = await d.publisher.publish(key, 'personal', { destinations: ['bluesky'], postText: 'A day out' });
+
+  assert.deepEqual(d.s.published, [{ id: 'sid-1', identity: 'personal', destinations: ['bluesky'], postText: 'A day out' }]);
+  assert.equal(result.syndications[0].status, 'posted');
+  const rec = await d.store.getRecord(key);
+  assert.match(rec.publishedUri, /^at:\/\//);
+  assert.deepEqual(rec.syndications, [{ destination: 'bluesky',
+    remoteUrl: 'https://bluesky.example/post/sid-1', postedAt: '2026-09-18T12:00:00Z' }]);
+});
+
+test('a destination that failed is not recorded, so it stays available', async () => {
+  const d = await desk();
+  const key = await sentStrand(d);
+  d.s.failSyndicate = 'bsky is down';
+
+  const result = await d.publisher.publish(key, 'personal', { destinations: ['bluesky'], postText: 'x' });
+
+  assert.equal(result.syndications[0].status, 'failed');
+  const rec = await d.store.getRecord(key);
+  assert.match(rec.publishedUri, /^at:\/\//, 'the strand is still published');
+  assert.deepEqual(rec.syndications, []);
+});
+
+test('publishing with no destinations leaves syndications untouched', async () => {
+  const d = await desk();
+  const key = await sentStrand(d);
+  await d.publisher.publish(key, 'personal');
+  assert.equal((await d.store.getRecord(key)).syndications, undefined);
+});
+
+test('unpublishing a strand does not forget where it was posted', async () => {
+  const d = await desk();
+  const key = await sentStrand(d);
+  await d.publisher.publish(key, 'personal', { destinations: ['bluesky'], postText: 'x' });
+  await d.publisher.unpublish(key, 'personal');
+  const rec = await d.store.getRecord(key);
+  assert.equal(rec.publishedUri, null);
+  assert.equal(rec.syndications.length, 1, 'a post is a moment that happened');
+});
+
+test('mergeSyndications keeps posted and already, drops failed, replaces by destination', () => {
+  const had = [{ destination: 'bluesky', remoteUrl: 'old', postedAt: 't0' }];
+  assert.deepEqual(mergeSyndications(had, [
+    { destination: 'bluesky', status: 'already', remoteUrl: 'old', postedAt: 't0' },
+    { destination: 'mastodon', status: 'posted', remoteUrl: 'm', postedAt: 't1', droppedImages: 0 },
+    { destination: 'threads', status: 'failed', reason: 'no' },
+  ]), [{ destination: 'bluesky', remoteUrl: 'old', postedAt: 't0' },
+    { destination: 'mastodon', remoteUrl: 'm', postedAt: 't1' }]);
+  assert.deepEqual(mergeSyndications(undefined, undefined), []);
 });
