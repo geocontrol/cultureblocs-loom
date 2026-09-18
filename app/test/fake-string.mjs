@@ -106,7 +106,12 @@ export function fakeString({ records = [], media = {}, failMedia = new Set(), re
       return structuredClone(destinations);
     },
     /* The String publishes to the PDS and stamps `publishedUri` on the record;
-     * then posts to each destination not already used, keeping one row each. */
+     * then posts to each destination not already used, keeping one row each.
+     * Does not reproduce the real String's 422 refusals (an unknown
+     * destination, empty or over-long post text, or a non-strand record) or
+     * its dedupe of a destination named twice — tests of those belong to the
+     * String's own tests, or to `fakePublisher` in desk-controllers.test.mjs,
+     * which sits above this layer. */
     async publish(id, identity, { destinations: chosen = [], postText } = {}) {
       const path = `/publish/${id}`;
       reach(path);
