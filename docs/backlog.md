@@ -13,7 +13,7 @@ The four surfaces in `LOOM.md` §3 sort them: **Feeds** takes 1 and 5,
 |---|---|---|---|
 | 1 | Totem beads into Loom, in place | Feeds | **done** 2026-09 |
 | 2 | Publish a strand to Instagram | Publish | **seam built** 2026-09 — the adapter is a later module |
-| 3 | A wall of my published blocs | *not Loom* | new; two partial precedents |
+| 3 | A wall of my published blocs | *not Loom* | **done** 2026-09 — cultureblocs.com/wall/ |
 | 4 | Publish a strand to Bluesky, Mastodon, … | Publish | **done** 2026-09 for Bluesky |
 | 5 | Extract works / people / events from prose | Feeds | **already designed** (§9); unbuilt |
 
@@ -150,6 +150,32 @@ Instagram is the expensive one and should not go first.
 ---
 
 ## 3 · A wall of my published blocs
+
+**Done**, 2026-09 — [spec](https://github.com/geocontrol/cultureblocs-site/blob/main/docs/superpowers/specs/2026-09-21-the-wall-design.md),
+[plan](https://github.com/geocontrol/cultureblocs-site/blob/main/docs/superpowers/plans/2026-09-21-the-wall.md),
+built in `cultureblocs-site` at `/wall/`
+([site#1](https://github.com/geocontrol/cultureblocs-site/pull/1)):
+`cultureblocs.com/wall/<handle>/` lists one actor's published strands newest
+first, ten a page, and `cultureblocs.com/wall/<handle>/<rkey>` is a single
+strand whole — **the first human-facing permalink this project has had**.
+Static files reading the PDS in the browser, as this entry guessed: direct was
+the cheaper first cut and it works for any actor. The entry's appview question
+answered itself — `GET /records` has no cursor, and `APPVIEW.md`'s "no ranking,
+no feed, no algorithm" rules out making it a content surface. The strands
+element was left alone rather than grown a cursor; it gained only the `uri` it
+had been discarding ([string#13](https://github.com/geocontrol/cultureblocs-string/pull/13)),
+so an embed can link inward.
+
+**One thing this entry did not foresee:** a published strand's rkey is a uuid4
+(the String publishes under its record id), so the order a PDS returns has
+nothing to do with date — cursor paging cannot produce a date-ordered wall at
+all. The wall fetches every strand and sorts, which is affordable only because
+an entry is a summary and needs no beads. Spec §3.1 records it.
+
+**What it unlocks:** a link back. A `com.cultureblocs.strand` posted to Bluesky
+can now carry a link facet, and an Instagram caption has an address to name —
+so item 2's remaining blocker is only Instagram's own (a Business or Creator
+account and a linked Facebook app).
 
 **Ask.** A page of all my published cultureblocs in date order, N per page
 with paging back through older entries. Probably not Loom — an appview of one
