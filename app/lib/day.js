@@ -62,10 +62,28 @@ export function monthGrid(month, counts = new Map()) {
 const firstLine = (s) => str(s).split('\n').find((l) => l.trim())?.trim() ?? '';
 
 /* The words a row shows for a record body. */
+/* What a bead is about, by name, when that name is not its `subject.name`.
+ *
+ * A bead made by the "I went" / "I saw" pages points at the event or film as
+ * a strongRef (`subject: { uri, cid }`), which carries no name: the record it
+ * points at holds the name. Newer ones also carry a subject ref with the name
+ * as its label; older ones only name it in the link they were given. So: a
+ * subject ref's label, else — for a strongRef subject — the first link's title. */
+export function aboutLabel(body) {
+  const b = body || {};
+  const ref = list(b.refs).find((r) => r?.role === 'subject' && str(r?.descriptor?.label));
+  if (ref) return str(ref.descriptor.label);
+  if (str(b.subject?.uri).startsWith('at://')) return str(list(b.links).find((l) => str(l?.title))?.title);
+  return '';
+}
+
 export function summary(type, body) {
   const b = body || {};
   if (type === STRAND) return firstLine(b.title) || firstLine(b.narrative) || 'Untitled strand';
-  return firstLine(b.note) || str(b.subject?.name) || str(b.work?.title) || '';
+  const about = str(b.subject?.name) ? '' : aboutLabel(b);
+  const note = firstLine(b.note);
+  if (about) return note ? `${about} — ${note}` : about;
+  return note || str(b.subject?.name) || str(b.work?.title) || '';
 }
 
 const kindOf = (type, body) => (type === STRAND ? 'strand' : str(body?.kind) || type.split('.').pop());
@@ -78,7 +96,7 @@ export function matches(r, { text = '', kind = '', app = '' } = {}) {
   if (!needle) return true;
   const b = r.body || {};
   const hay = [b.note, b.title, b.narrative, b.subject?.name, b.place?.name, ...list(b.tags),
-    ...list(b.refs).map((ref) => ref?.descriptor?.label)].filter((v) => typeof v === 'string').join('\n').toLowerCase();
+    ...list(b.refs).map((ref) => ref?.descriptor?.label), ...list(b.links).map((l) => l?.title)].filter((v) => typeof v === 'string').join('\n').toLowerCase();
   return hay.includes(needle);
 }
 

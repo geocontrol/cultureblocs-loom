@@ -74,6 +74,9 @@ pre{margin:0;white-space:pre-wrap;font:12px var(--mono)}
 .mark.pending,.mark.draft{color:var(--dwell);border-color:var(--dwell)}
 .mark.conflict,.mark.invalid,.mark.missing{color:var(--encounter);border-color:var(--encounter)}
 .mark.proposal{border-style:dashed}
+.editor .about{flex:1 1 12rem;margin:.5rem 0;display:flex;flex-wrap:wrap;gap:.2rem .5rem;align-items:baseline}
+.editor .about .label{font:12px var(--mono);color:var(--faint)}
+.editor .about .uri{font-size:10px;color:var(--faint);overflow-wrap:anywhere}
 .mark.public{color:var(--visit);border-color:var(--visit)}
 .bar .auto{font:11px var(--mono);color:var(--faint)}
 .bar .auto.failed{color:var(--encounter)}

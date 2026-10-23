@@ -1,9 +1,23 @@
 /* The bead form: a whole bead in one place. Pure. */
+import { aboutLabel } from '../lib/day.js';
 import { html } from './html.js';
 import { KINDS, footerView, linksText, list, localInput, photosView, placeName, problemsView, provenanceView, restoredView } from './view-form.js';
 import { refsView } from './view-refs.js';
 
 const BEAD = 'com.cultureblocs.bead';
+
+/* A subject that is a published record (an event or film the "I went" pages
+ * pointed at) is shown, not edited: it is a reference, and the place field
+ * would have nowhere to write. Any other subject is the place, as a name. */
+function record_subject(body) {
+  const uri = typeof body.subject?.uri === 'string' ? body.subject.uri : '';
+  if (!uri.startsWith('at://')) return html`<label>place <input name="place" value="${placeName(BEAD, body)}"></label>`;
+  const link = (Array.isArray(body.links) ? body.links : []).find((l) => typeof l?.uri === 'string' && /^https?:\/\//.test(l.uri));
+  return html`<p class="about"><span class="label">about</span>
+    <strong>${aboutLabel(body) || 'a published record'}</strong>
+    ${link ? html`<a href="${link.uri}" target="_blank" rel="noopener">open</a>` : ''}
+    <code class="uri" title="the record this bead points at">${uri}</code></p>`;
+}
 
 /* state: { record, body, problems, urls, restoredDraftAt, dirtyDraft, locked } — record is null for a new bead; locked renders it inert. */
 export function beadFormView(state) {
@@ -25,7 +39,7 @@ export function beadFormView(state) {
       </div>
       <label>note <textarea name="text" rows="6" maxlength="3000">${body.note || ''}</textarea></label>
       <div class="row">
-        <label>place <input name="place" value="${placeName(BEAD, body)}"></label>
+        ${record_subject(body)}
         <label>tags, comma separated <input name="tags" value="${list(body.tags).filter((t) => typeof t === 'string').join(', ')}"></label>
       </div>
       ${geo ? html`<p class="geo">coordinates ${String(geo.lat)}, ${String(geo.lng)} (${String(geo.precision || '')}) are kept as they are</p>` : ''}
