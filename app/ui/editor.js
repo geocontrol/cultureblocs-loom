@@ -264,6 +264,7 @@ export async function mountEditor(root, ctx, { key, day = '', isNew = false }) {
       state.body = structuredClone(record.body);
       Object.assign(state, { tabConflict: null, restoredDraftAt: null, dirtyDraft: false });
       changed();
+      ctx.saved?.();
     } catch (e) {
       if (!(e instanceof Conflict)) throw e;
       state.tabConflict = e.current;

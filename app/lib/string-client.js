@@ -4,7 +4,8 @@
  * its status and its parsed body (`detail`), so send can tell a stale version
  * (412, with the String's current record) from invalid content (422). */
 
-export const LIST_LIMIT = 2000;   // the most one GET /records returns (the String caps limit here)
+export const LIST_LIMIT = 2000;     // the most one GET /records returns (the String caps limit here)
+export const CHANGES_PAGE = 2000;   // the most one GET /changes returns
 
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isRecord = (b) => (isObject(b) && typeof b.id === 'string' && isObject(b.body)
@@ -76,6 +77,27 @@ export function stringClient(baseUrl, token, fetchImpl = globalThis.fetch.bind(g
           + 'some would be missed, so nothing was imported');
       }
       return body.records;
+    },
+    /* One page of the String's change feed after `since`: { changes, cursor }.
+     * Auto-sync uses only which records changed; each is then read whole. */
+    async changes(since = 0, limit = CHANGES_PAGE) {
+      return json(`/changes?since=${encodeURIComponent(since)}&limit=${limit}`, (b) => (Array.isArray(b?.changes)
+        && Number.isInteger(b.cursor) ? null : 'expected { changes: [...], cursor }'));
+    },
+    /* Ask the String to bring born-public beads home from `identity`'s repo
+     * (POST /import/pds): the round trip for records written straight to the
+     * network, such as the "I went" composer's. A 404 with no detail is a
+     * String older than the endpoint. */
+    async importPds(identity, { dryRun = false } = {}) {
+      try {
+        return await json('/import/pds', (b) => (isObject(b?.counts) ? null : 'expected { counts, ... }'),
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identity, dryRun }) });
+      } catch (e) {
+        if (e instanceof StringError && e.status === 404 && e.detail !== 'unknown identity') {
+          throw new StringError(e.url, 'this String cannot pull from the network yet: update cultureblocs-string', { status: 404 });
+        }
+        throw e;
+      }
     },
     async getRecord(id) {
       return json(`/records/${encodeURIComponent(id)}`, isRecord);

@@ -73,6 +73,7 @@ export async function mountString(root, ctx, { day = '', key = '' } = {}) {
       await ctx.loom.remove(rowKey);
     } else return;
     ctx.broadcast();
+    ctx.saved?.();
     await render();
   }
 

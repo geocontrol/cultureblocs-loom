@@ -83,10 +83,15 @@ export async function planSend(records) {
 const problemsOf = (detail) => (Array.isArray(detail) ? detail.map((p) => (typeof p === 'string' ? p : JSON.stringify(p)))
   : [typeof detail === 'string' ? detail : JSON.stringify(detail)]);
 
-export async function runSend({ store, client, now = () => Date.now(), onProgress = () => {} }) {
+/* `skip` names ops this Send leaves for later — auto-sync passes ['delete'],
+ * because a delete is the one change that cannot be taken back, so it waits
+ * for a person to press Send. Skipped ops are not reported. */
+export async function runSend({ store, client, now = () => Date.now(), onProgress = () => {}, skip = [] }) {
   const iso = () => new Date(now()).toISOString();
   const records = await store.allRecords();
-  const { ready, held } = await planSend(records);
+  const plan = await planSend(records);
+  const ready = plan.ready.filter((r) => !skip.includes(r.op));
+  const { held } = plan;
   const results = held.map((h) => ({ key: h.key, status: 'held', reason: h.reason }));
 
   // A bead's DELETE is held while a strand may still list it (see the header

@@ -41,9 +41,24 @@ Open **settings**, point Loom at your String (`http://localhost:8100`) with its
 token, **check**, then **import**. Write with **+ New bead** and **+ New strand**,
 edit or delete anything from the String column; **send** takes every change to
 the String, and a record changed on both sides is marked for you to choose.
+**Sync automatically** (settings) does that on its own while a tab is open:
+every few minutes it imports what the String's change feed says moved and
+sends what changed here, and it can send a few seconds after each save.
+Deletes always wait for a press of **send**. **Pull from the network** brings
+home beads written straight to your account — the "I went" pages on
+cultureblocs.com, Pocket — already marked public, so they can be edited and
+republished in place (needs a String with `POST /import/pds`). Published
+records carry a **public** mark in the String column.
 **download backup** keeps a copy of everything in this browser. The String
-needs cultureblocs-string with PATCH null-removal and DELETE If-Match. Loom is
-desk-first on `localhost`: a phone needs Loom served over HTTPS.
+needs cultureblocs-string with PATCH null-removal and DELETE If-Match.
+
+Loom needs a **secure page**: browsers give the hashing it uses only to HTTPS
+and `localhost`. On another machine, `http://<tailscale-ip>:8108` is neither
+and Loom says so rather than starting. Use an SSH tunnel
+(`ssh -N -L 8108:localhost:8108 -L 8100:localhost:8100 you@host`, then
+`http://localhost:8108` with the String at `http://localhost:8100`) or serve
+both over HTTPS (`tailscale serve`). Each address keeps its own copy of Loom's
+data.
 
     node --test app/test/*.test.mjs        # the app's tests, no dependencies (Node ≥ 22.7)
     scripts/vendor-sdk.sh                  # refresh app/vendor from ../cultureblocs-string
