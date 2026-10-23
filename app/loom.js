@@ -9,18 +9,21 @@
  *   #/edit/<key>?day=…    the form for a record, or for a new one not yet saved
  *                         (a key with neither record nor draft opens a form only with new=1)
  *   #/send                what is waiting, and the last Send's results
- *   #/settings            String address and token, import, backup, restore
+ *   #/settings            String address and token, import, auto-sync, pull, backup, restore
  *
  * Phase 1 addresses (#/thread, #/mint, #/compose, #/string) redirect here (lib/routing.js).
  *
  * On a narrow screen the page shows one column at a time: the String for #/
  * and #/day, the editor for everything else (body[data-view], loom.css). */
+import { createAutoSync, readSyncSettings } from './lib/autosync.js';
 import { BEAD, STRAND, openLoom } from './lib/envelope.js';
+import { importChanges } from './lib/importer.js';
 import { loadRegistry } from './lib/lexicons.js';
 import { hashFromName } from './lib/media.js';
 import { migrateStore } from './lib/migrate.js';
 import { stringPublisher } from './lib/publisher.js';
 import { phase1Redirect, routeSerializer } from './lib/routing.js';
+import { runSend } from './lib/sender.js';
 import { openStore } from './lib/store.js';
 import { stringClient } from './lib/string-client.js';
 import { hasSerial, openPort } from './lib/totem-port.js';
@@ -38,7 +41,27 @@ const NEW = { bead: BEAD, strand: STRAND };
 let mounted = [];
 let dirty = false;
 
+/* Why this page cannot run Loom, or null. Loom hashes every record to tell
+ * an edit here from an edit on the String, and browsers give a page that
+ * hashing (crypto.subtle) only in a secure context: HTTPS, or localhost. An
+ * http:// address on another machine — a Tailscale IP, a LAN name — is
+ * neither, and the first import would fail with a bare TypeError. */
+function insecure() {
+  if (globalThis.crypto?.subtle) return null;
+  const here = `${location.protocol}//${location.host}`;
+  return `Loom needs a secure page, and ${here} is not one: browsers allow the hashing Loom uses `
+    + 'only over HTTPS or on localhost. Open Loom on localhost (an SSH tunnel to this machine works: '
+    + 'ssh -N -L 8108:localhost:8108 -L 8100:localhost:8100 you@host), or serve it over HTTPS '
+    + '(tailscale serve, with the String served over HTTPS too). Each address keeps its own copy of '
+    + 'Loom’s data, so pick the one you will keep using.';
+}
+
 async function boot() {
+  const unsafe = insecure();
+  if (unsafe) {
+    $('#editor').textContent = unsafe;
+    return;
+  }
   const store = await openStore();
   await migrateStore(store);
   const registry = await loadRegistry(async (p) => (await fetch(p)).json(), './vendor/lexicons/');
@@ -73,6 +96,20 @@ async function boot() {
      * The desk asks for a port and does not know what it is. */
     openPort: hasSerial() ? (opts) => openPort(opts) : null,
     setDirty: (d) => { dirty = d; },
+    /* A record was saved, kept or deleted here: auto-sync may want to send. */
+    saved: () => ctx.sync?.saved(),
+    /* Bring what changed on the String into this browser (the change feed). */
+    importChanges: async () => importChanges({ store, registry, loom, client: await ctx.client(), now: ctx.now }),
+    /* The String's client, or null when none is configured. */
+    async client() {
+      const url = await store.getMeta('stringUrl');
+      return url ? stringClient(url, await store.getMeta('stringToken'), ctx.fetch) : null;
+    },
+    async syncSettingsChanged() {
+      channel?.postMessage('sync-settings');
+      await ctx.sync?.schedule();
+      ctx.desk.refresh();
+    },
     async persisted() { return (await navigator.storage?.persisted?.()) ?? false; },
     async photoUrls(names) {
       for (const name of names) {
@@ -151,15 +188,50 @@ async function boot() {
     }
   }
 
+  ctx.sync = createAutoSync({
+    store,
+    now: ctx.now,
+    async blocked() {
+      if (!(await store.getMeta('stringUrl'))) return 'no String is set';
+      if (navigator.onLine === false) return 'this browser is offline';
+      if (ctx.desk.busy) return 'something else is writing';
+      if (dirty) return 'an edit is not saved yet';
+      return null;
+    },
+    // One tab syncs at a time; a tab that cannot take the lock skips this turn.
+    lock: navigator.locks
+      ? (fn) => navigator.locks.request('loom-sync', { ifAvailable: true }, (held) => (held ? fn() : null))
+      : (fn) => fn(),
+    async run({ withImport }) {
+      ctx.desk.busy = true;
+      ctx.desk.refresh();
+      try {
+        const client = await ctx.client();
+        const imported = withImport ? await importChanges({ store, registry, client, now: ctx.now }) : null;
+        const sent = await runSend({ store, client, now: ctx.now, skip: ['delete'] });
+        if (sent.some((r) => r.status !== 'held')) ctx.desk.results = sent;
+        return { imported, sent };
+      } finally {
+        ctx.desk.busy = false;
+        ctx.broadcast();
+      }
+    },
+    onRun: () => ctx.desk.refresh(),
+  });
+  ctx.autoState = async () => ({ on: (await readSyncSettings(store)).autoSync, last: await store.getMeta('lastAutoSync') });
+
   topbar = await mountTopbar($('#bar'), ctx);
   column = await mountString($('#column'), ctx, {});
   window.addEventListener('hashchange', route);
   channel?.addEventListener('message', (e) => {
     if (e.data === 'restored') reloadWhenClean();   // another tab replaced the store
+    else if (e.data === 'sync-settings') ctx.sync.schedule().then(() => ctx.desk.refresh());
     else refreshAll();
   });
+  window.addEventListener('online', () => ctx.sync.schedule({ soon: true }));
 
   await route();
+  ctx.sync.schedule({ soon: true });   // a first run shortly after opening, then on the interval
   requestPersistence();   // not awaited: a permission prompt must not hold the first page back
   registerServiceWorker();
   window.loom = ctx;   // for scripted checks and the console

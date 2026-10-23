@@ -74,6 +74,13 @@ pre{margin:0;white-space:pre-wrap;font:12px var(--mono)}
 .mark.pending,.mark.draft{color:var(--dwell);border-color:var(--dwell)}
 .mark.conflict,.mark.invalid,.mark.missing{color:var(--encounter);border-color:var(--encounter)}
 .mark.proposal{border-style:dashed}
+.mark.public{color:var(--visit);border-color:var(--visit)}
+.bar .auto{font:11px var(--mono);color:var(--faint)}
+.bar .auto.failed{color:var(--encounter)}
+.panel fieldset.sync{border:0;padding:0;margin:0 0 .5rem}
+.panel fieldset.sync label{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.panel fieldset.sync input[type=checkbox]{width:auto;margin:0}
+.panel fieldset.sync select{width:auto}
 .row .tools{display:flex;gap:.3rem}
 .row .tools button{font-size:11px;padding:0 .4rem}
 

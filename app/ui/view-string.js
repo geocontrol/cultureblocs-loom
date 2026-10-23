@@ -26,6 +26,7 @@ function markers(row, change) {
   const r = row.record;
   if (row.draft) return html`<span class="mark draft">draft</span>`;
   return html`${r.state === 'proposal' ? html`<span class="mark proposal">proposal</span>` : ''}${
+    r.publishedUri ? html`<span class="mark public" title="${r.publishedUri}">public</span>` : ''}${
     list(r.body?.media).length ? html`<span class="mark photo">photo</span>` : ''}${
     change ? html`<span class="mark pending">${CHANGE[change]}</span>` : ''}${
     r.conflict ? html`<span class="mark conflict">conflict</span>` : ''}${

@@ -16,6 +16,7 @@ The four surfaces in `LOOM.md` §3 sort them: **Feeds** takes 1 and 5,
 | 3 | A wall of my published blocs | *not Loom* | **done** 2026-09 — cultureblocs.com/wall/ |
 | 4 | Publish a strand to Bluesky, Mastodon, … | Publish | **done** 2026-09 for Bluesky |
 | 5 | Extract works / people / events from prose | Feeds | **already designed** (§9); unbuilt |
+| 6 | Sync on a timer and after saving; pull born-public beads home; public mark | Desk | **done** 2026-10 — interim, until Phase 2 sync |
 
 ---
 
@@ -274,6 +275,22 @@ and the shipped `annotation.matchConfidence` field
 path.
 
 ---
+
+## 6 · Sync without pressing Send, and the round trip
+
+**Done**, 2026-10, as an interim ahead of Phase 2 (§5): `lib/autosync.js`
+schedules an import of what the String's change feed names (`importChanges`,
+so a quiet String costs one request) followed by a Send, every 5–60 minutes
+while a tab is open, and a Send a few seconds after saves go quiet. Off by
+default; deletes never go automatically; one tab at a time (Web Locks).
+**Pull from the network** calls the String's `POST /import/pds`, which brings
+beads written straight to the PDS (the "I went" composer, Pocket) home as kept
+and published — the round trip §8 planned — and Loom then imports them. The
+String column shows a **public** mark, and a publish restamps the strand and
+its beads locally at once, which also fixes a false conflict when a strand
+was edited straight after publishing. Still open: strands are not pulled (their
+items are at:// refs to map back), and records deleted on the String are not
+removed here, by either import.
 
 ## Two incidental flags, unrelated to the five
 

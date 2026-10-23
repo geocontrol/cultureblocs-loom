@@ -1,11 +1,18 @@
 /* The smaller surfaces: the day summary, the delete confirmation, the
  * conflict view, the top bar with Send's results, and settings. Pure. */
+import { INTERVALS } from '../lib/autosync.js';
 import { summary } from '../lib/day.js';
-import { html } from './html.js';
+import { html, raw } from './html.js';
 import { hhmm } from './view-form.js';
 import { dayLabel } from './view-string.js';
 
-const when = (iso) => (iso ? iso.replace('T', ' ').slice(0, 16) : 'never');
+/* A stored instant in this browser's own time zone, to the minute. */
+const when = (iso) => {
+  const d = iso ? new Date(iso) : null;
+  if (!d || Number.isNaN(d.getTime())) return 'never';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 /* A record's words, cut to fit one line. */
 const short = (s, n = 80) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
@@ -65,12 +72,24 @@ export function conflictView({ fields = [], theirs = true, deleted = false, arme
     </section>`;
 }
 
-/* state: { pending, connected, busy } */
-export function topbarView({ pending = 0, connected = false, busy = false }) {
+const clock = (iso) => (iso ? new Date(iso).toTimeString().slice(0, 5) : '');
+
+/* What the top bar says about auto-sync: nothing when it is off. */
+function autoView(auto) {
+  if (!auto?.on) return '';
+  const last = auto.last;
+  if (!last) return html`<a class="auto" href="#/settings" title="auto-sync is on; it has not run yet">auto</a>`;
+  return html`<a class="auto${last.ok ? '' : ' failed'}" href="#/settings" title="${last.summary}">${
+    last.ok ? `auto · ${clock(last.at)}` : 'auto-sync failed'}</a>`;
+}
+
+/* state: { pending, connected, busy, auto: { on, last } } */
+export function topbarView({ pending = 0, connected = false, busy = false, auto = null }) {
   return html`
     <a class="brand" href="#/">LOOM</a>
     <span class="status">${!connected ? html`<a href="#/settings">not connected</a>`
       : pending ? html`<a href="#/send">${plural(pending, 'change')} to send</a>` : 'in sync'}</span>
+    ${connected ? autoView(auto) : ''}
     ${connected ? html`<button type="button" class="primary" data-action="send" ${busy || !pending ? 'disabled' : ''}>${busy ? 'sending…' : 'send'}</button>` : ''}
     <a class="feeds" href="#/feeds">feeds</a>
     <a class="settings" href="#/settings">settings</a>`;
@@ -98,7 +117,21 @@ export function sendView({ changes = [], results = [], deletes = [], lines = new
     </section>`;
 }
 
-/* state: { stringUrl, stringToken, check, importResult, lastImportAt, lastBackupAt, busy, pendingRestore, persisted, pending } */
+/* What a pull from the network did, in words. */
+export function pullSummary(out, imported) {
+  const c = out?.counts || {};
+  const parts = [`${c.created || 0} new`];
+  if (c.refreshed) parts.push(`${c.refreshed} updated from the network`);
+  if (c.unchanged || c.own) parts.push(`${(c.unchanged || 0) + (c.own || 0)} already held`);
+  if (c.conflict) parts.push(`${c.conflict} edited both here and on the network — left as the String has it`);
+  if (c.invalid) parts.push(`${c.invalid} that do not validate`);
+  if (c.strands) parts.push(`${plural(c.strands, 'strand')} not pulled (not yet supported)`);
+  const here = imported?.counts ? ` Then imported here: ${(imported.counts.add || 0) + (imported.counts.update || 0)} changed.` : '';
+  return `From the network: ${parts.join(', ')}.${here}`;
+}
+
+/* state: { stringUrl, stringToken, check, importResult, lastImportAt, lastBackupAt, busy, pendingRestore, persisted, pending,
+ *          sync: { autoSync, syncMinutes, sendOnSave }, lastAutoSync, identities, identitiesError, pullIdentity, pullResult } */
 export function settingsView(s) {
   return html`
     <section class="panel">
@@ -115,6 +148,32 @@ export function settingsView(s) {
       <button type="button" data-action="import" ${s.busy ? 'disabled' : ''}>import</button>
       <span class="status">last import: ${when(s.lastImportAt)}</span>
       ${s.importResult ? html`<p class="result">${s.importResult}</p>` : ''}
+
+      <h3>Sync automatically</h3>
+      <p>While a Loom tab is open: import what changed on the String and send what changed here,
+        on a timer, and send soon after each save. Deletes always wait for you to press
+        <a href="#/send">send</a>; conflicts are marked for you to choose, never settled for you.</p>
+      <fieldset class="sync">
+        <label><input type="checkbox" name="autoSync" ${s.sync?.autoSync ? raw('checked') : ''}> every
+          <select name="syncMinutes" aria-label="minutes between syncs">${INTERVALS.map((m) => html`<option value="${m}"${
+            m === s.sync?.syncMinutes ? raw(' selected') : ''}>${m} minutes</option>`)}</select></label>
+        <label><input type="checkbox" name="sendOnSave" ${s.sync?.sendOnSave ? raw('checked') : ''}> send soon after I save</label>
+      </fieldset>
+      <div class="row"><button type="button" data-action="sync-now" ${s.busy ? 'disabled' : ''}>sync now</button>
+        <span class="status">last automatic sync: ${s.lastAutoSync ? html`${when(s.lastAutoSync.at)} — ${
+          s.lastAutoSync.ok ? s.lastAutoSync.summary : `failed: ${s.lastAutoSync.summary}`}` : 'never'}</span></div>
+
+      <h3>Pull from the network</h3>
+      <p>Beads written straight to your account — from the “I went” pages on cultureblocs.com, or Pocket —
+        never pass through the String. This asks the String to bring them home, marked as already public,
+        then imports them here so you can edit them and republish in place.</p>
+      ${s.identities?.length ? html`<div class="row">
+          ${s.identities.length > 1 ? html`<label>from <select name="pullIdentity">${s.identities.map((i) => html`<option value="${i.name}"${
+            i.name === s.pullIdentity ? raw(' selected') : ''}>${i.handle || i.name}</option>`)}</select></label>`
+            : html`<span>from <strong>${s.identities[0].handle || s.identities[0].name}</strong></span>`}
+          <button type="button" data-action="pull" ${s.busy ? 'disabled' : ''}>pull from the network</button></div>`
+        : html`<p class="hint">${s.identitiesError || 'The String holds no identities: add one on the String first.'}</p>`}
+      ${s.pullResult ? html`<p class="result">${s.pullResult}</p>` : ''}
 
       <h3>Backup</h3>
       <p>Everything in this browser in one file (not the token). Last backup: ${when(s.lastBackupAt)}.

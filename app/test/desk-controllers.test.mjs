@@ -340,8 +340,9 @@ test('settings ignores import while a Send is running', async () => {
   await mountSettings(root, ctx);
   assert.match(root.innerHTML, /data-action="import" disabled/);
   await root.fire('click', button('import'));
-  assert.deepEqual(asked, [], 'no import started');
-  assert.doesNotMatch(root.innerHTML, /Failed to fetch/);
+  // Opening settings asks who the String holds (for pulling); nothing else may be asked.
+  assert.deepEqual(asked.filter((u) => !u.endsWith('/identities')), [], 'no import started');
+  assert.doesNotMatch(root.innerHTML, /class="result">[^<]*Failed to fetch/);
 });
 
 test('typing updates problems in place without throwing', async () => {

@@ -12,6 +12,8 @@
  * it lives outside the client and is exported on its own.
  */
 import { STRAND } from './envelope.js';
+import { restamp } from './importer.js';
+import { keyFromItemUri } from './keys.js';
 
 /* Why this record cannot be published from Loom, or null if it can.
  *
@@ -53,6 +55,16 @@ export function stringPublisher({ store, client }) {
     await store.putRecord({ ...fresh, publishedUri, ...posted });
   }
 
+  /* A publish restamps the strand and each bead in it on the String, and
+   * marks each bead public: take those versions now rather than at the next
+   * import, so the timeline shows the beads as public and an edit made
+   * straight afterwards does not send against the version before. */
+  async function restampAfter(key) {
+    const rec = await store.getRecord(key);
+    const members = (Array.isArray(rec?.body?.items) ? rec.body.items : []).map((it) => keyFromItemUri(it?.uri)).filter(Boolean);
+    await restamp({ store, client, keys: [key, ...members] }).catch(() => {});   // the next import does the same
+  }
+
   async function ready(key) {
     const rec = await store.getRecord(key);
     const why = whyNotPublishable(rec);
@@ -78,6 +90,7 @@ export function stringPublisher({ store, client }) {
       const rec = await ready(key);
       const result = await client.publish(rec.stringId, identity, { destinations, postText });
       await record(key, result.strandUri || result.uri || null, destinations.length ? (result.syndications || []) : null);
+      await restampAfter(key);
       return result;
     },
 
@@ -88,6 +101,7 @@ export function stringPublisher({ store, client }) {
       if (!rec.stringId) throw new Error(`cannot unpublish ${key}: it is not on the String`);
       const removed = await client.unpublish(rec.stringId, identity);
       await record(key, null);
+      await restampAfter(key);
       return removed;
     },
   };

@@ -13,6 +13,8 @@ export function fakeString({ records = [], media = {}, failMedia = new Set(), re
   const calls = [];
   const published = [];
   const unpublished = [];
+  const feed = [];                                   // the change feed: { seq, recordId }
+  const log = (recordId) => feed.push({ seq: feed.length + 1, recordId });
   const stamp = () => `${String(++clock).padStart(13, '0')}-00000-fake`;
   const dayOf = (r) => String(r.createdAt).slice(0, 10);
   const fail = (path, status, detail = null) => new StringError(`http://string.test${path}`, `HTTP ${status}`, { status, detail });
@@ -24,7 +26,7 @@ export function fakeString({ records = [], media = {}, failMedia = new Set(), re
   const stale = (rec, hlc, path) => {
     if (hlc && hlc !== rec.hlc) throw fail(path, 412, { error: 'record has changed since you loaded it', yourHlc: hlc, currentHlc: rec.hlc, current: structuredClone(rec) });
   };
-  for (const r of records) r.hlc ??= stamp();
+  for (const r of records) { r.hlc ??= stamp(); log(r.id); }
 
   const state = { offline: false };
   const reach = (path) => { if (state.offline) throw new StringError(`http://string.test${path}`, 'unreachable (offline)'); };
@@ -43,6 +45,28 @@ export function fakeString({ records = [], media = {}, failMedia = new Set(), re
       reach('/records');
       calls.push(`listRecordsForDay ${day}`);
       return structuredClone(records.filter((r) => dayOf(r) === day));
+    },
+    async changes(since = 0, limit = 2000) {
+      reach('/changes');
+      calls.push(`changes ${since}`);
+      const page = feed.filter((c) => c.seq > since).slice(0, limit);
+      return { changes: structuredClone(page), cursor: page.length ? page.at(-1).seq : since };
+    },
+    async importPds(identity) {
+      reach('/import/pds');
+      calls.push(`importPds ${identity}`);
+      const made = [];
+      for (const r of out.network) {
+        if (records.some((x) => x.publishedUri === r.uri || x.dedupeKey === `atproto:${r.uri}`)) continue;
+        const id = `sid-${++n}`;
+        records.push({ id, dedupeKey: `atproto:${r.uri}`, type: r.type, sourceApp: 'com.cultureblocs.went',
+          createdAt: r.value.createdAt, state: 'kept', hlc: stamp(), publishedUri: r.uri, body: structuredClone(r.value) });
+        log(id);
+        made.push({ uri: r.uri, id });
+      }
+      return { did: 'did:plc:fake', pds: 'https://pds.test', dryRun: false,
+        counts: { created: made.length, refreshed: 0, unchanged: out.network.length - made.length, own: 0, conflict: 0, invalid: 0, strands: 0, older: 0 },
+        created: made, refreshed: [], conflicts: [], invalid: [] };
     },
     async getRecord(id) {
       reach(`/records/${id}`);
@@ -64,6 +88,7 @@ export function fakeString({ records = [], media = {}, failMedia = new Set(), re
         if (existing) return { dedupeKey: r.dedupeKey, status: 'duplicate', id: existing.id };
         const id = `sid-${++n}`;
         records.push({ ...structuredClone(r), id, state: r.state || 'kept', hlc: stamp() });
+        log(id);
         return { dedupeKey: r.dedupeKey, status: 'created', id };
       });
     },
@@ -77,6 +102,7 @@ export function fakeString({ records = [], media = {}, failMedia = new Set(), re
       for (const [k, v] of Object.entries(fields)) { if (v === null) delete rec.body[k]; else rec.body[k] = structuredClone(v); }
       if (rec.state === 'proposal') rec.state = 'kept';
       rec.hlc = stamp();
+      log(id);
       return structuredClone(rec);
     },
     async setState(id, next) {
@@ -84,7 +110,7 @@ export function fakeString({ records = [], media = {}, failMedia = new Set(), re
       reach(path);
       calls.push(`state ${id} ${next}`);
       const rec = find(id, path);
-      if (rec.state !== next) { rec.state = next; rec.hlc = stamp(); }
+      if (rec.state !== next) { rec.state = next; rec.hlc = stamp(); log(id); }
       return structuredClone(rec);
     },
     async deleteRecord(id, hlc) {
@@ -94,6 +120,7 @@ export function fakeString({ records = [], media = {}, failMedia = new Set(), re
       const rec = find(id, path);
       stale(rec, hlc, path);
       records.splice(records.indexOf(rec), 1);
+      log(id);
     },
     async listIdentities() {
       reach('/identities');
@@ -122,6 +149,16 @@ export function fakeString({ records = [], media = {}, failMedia = new Set(), re
       published.push(chosen.length ? { id, identity, destinations: chosen, postText } : { id, identity });
       const uri = `at://did:plc:fake/${rec.type}/${id}`;
       rec.publishedUri = uri;
+      rec.hlc = stamp();
+      log(id);
+      // Like the real String: each bead the strand lists is published and restamped too.
+      for (const it of rec.body?.items || []) {
+        const member = records.find((x) => `spine://records/${x.id}` === it?.uri);
+        if (!member) continue;
+        member.publishedUri = `at://did:plc:fake/${member.type}/${member.id}`;
+        member.hlc = stamp();
+        log(member.id);
+      }
       const key = rec.type.endsWith('strand') ? 'strandUri' : 'uri';
       const result = { identity, handle: 'someone.example', did: 'did:plc:fake', records: [uri], [key]: uri };
       if (!chosen.length) return result;
@@ -146,6 +183,15 @@ export function fakeString({ records = [], media = {}, failMedia = new Set(), re
       unpublished.push({ id, identity });
       const had = Boolean(rec.publishedUri);
       rec.publishedUri = null;
+      rec.hlc = stamp();
+      log(id);
+      for (const it of rec.body?.items || []) {
+        const member = records.find((x) => `spine://records/${x.id}` === it?.uri);
+        if (!member?.publishedUri) continue;
+        member.publishedUri = null;
+        member.hlc = stamp();
+        log(member.id);
+      }
       return had ? 1 : 0;
     },
     async postMedia(blob) {
@@ -162,12 +208,14 @@ export function fakeString({ records = [], media = {}, failMedia = new Set(), re
     const rec = find(id, `/records/${id}`);
     Object.assign(rec.body, structuredClone(fields));
     rec.hlc = stamp();
+    log(id);
     return structuredClone(rec);
   }
 
   /* `failPublish` / `failUnpublish` / `failSyndicate` are set by a test to make the String refuse. */
+  /* `network` holds born-public records ({ uri, type, value }) that importPds brings home. */
   const out = { client, records, media, posted, calls, published, unpublished, identities, destinations,
-    editOnString, state, failPublish: null, failUnpublish: null, failSyndicate: null };
+    editOnString, state, feed, network: [], failPublish: null, failUnpublish: null, failSyndicate: null };
   return out;
 }
 

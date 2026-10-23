@@ -74,13 +74,20 @@ export async function planImport(stringRecords, localByStringId, localByKey = ne
   return plan;
 }
 
-export async function runImport({ store, registry, client, now = () => Date.now(), onProgress = () => {} }) {
+/* `records`, when given, is the set of String records to plan against instead
+ * of the whole String — what importChanges passes, having read only the
+ * records the change feed named. Everything else runs as for a full import. */
+export async function runImport({ store, registry, client, now = () => Date.now(), onProgress = () => {}, records = null }) {
   const iso = () => new Date(now()).toISOString();
   const types = new Set((await client.health()).filter((t) => registry.recordTypes().includes(t)));
-  // Day by day: each day is far under the String's per-request limit (the client fails loudly if one is not).
   const stringRecords = [];
-  for (const { day } of await client.listDays()) {
-    stringRecords.push(...(await client.listRecordsForDay(day)).filter((r) => types.has(r.type)));
+  if (records) {
+    stringRecords.push(...records.filter((r) => types.has(r.type)));
+  } else {
+    // Day by day: each day is far under the String's per-request limit (the client fails loudly if one is not).
+    for (const { day } of await client.listDays()) {
+      stringRecords.push(...(await client.listRecordsForDay(day)).filter((r) => types.has(r.type)));
+    }
   }
 
   const all = await store.allRecords();
@@ -206,4 +213,80 @@ export async function runImport({ store, registry, client, now = () => Date.now(
   }
   await store.setMeta('lastImportAt', iso());
   return { counts, conflicts };
+}
+
+/* Where the String's change feed ends now: its cursor after the last page. */
+async function feedEnd(client, since = 0) {
+  let cursor = since;
+  const ids = new Set();
+  for (;;) {
+    const page = await client.changes(cursor);
+    for (const c of page.changes) if (typeof c?.recordId === 'string') ids.add(c.recordId);
+    if (!page.changes.length || page.cursor === cursor) break;
+    cursor = page.cursor;
+  }
+  return { cursor, ids };
+}
+
+/* An import of only what changed on the String since the last one, for
+ * auto-sync: reading every day of the String every few minutes would be
+ * hundreds of requests to learn that nothing moved.
+ *
+ * The String's change feed (`GET /changes`) names every record written since
+ * a cursor. Each named record is read whole and planned exactly as a full
+ * import plans it; the feed's bodies are not used, so a record changed three
+ * times is read once, as it is now. A record the String no longer has (404)
+ * is skipped — a full import does not act on deletions on the String either.
+ *
+ * With no cursor yet, this is a full import, and the cursor is taken from the
+ * feed's end *before* reading, so a write made during the import is read
+ * again next time rather than missed. Loom's own sends come back through the
+ * feed too; they plan as `unchanged` and cost one read each. */
+export async function importChanges({ store, registry, client, now = () => Date.now() }) {
+  const since = await store.getMeta('changesCursor');
+  if (!Number.isInteger(since)) {
+    const { cursor } = await feedEnd(client, 0);
+    const result = await runImport({ store, registry, client, now });
+    await store.setMeta('changesCursor', cursor);
+    return { ...result, full: true, read: null };
+  }
+  const { cursor, ids } = await feedEnd(client, since);
+  if (!ids.size) {
+    await store.setMeta('changesCursor', cursor);
+    return { counts: { add: 0, link: 0, update: 0, unchanged: 0, conflict: 0, invalid: 0, photos: 0, missing: 0 },
+      conflicts: [], full: false, read: 0 };
+  }
+  const records = [];
+  for (const id of ids) {
+    try {
+      records.push(await client.getRecord(id));
+    } catch (e) {
+      if (e.status !== 404) throw e;
+    }
+  }
+  const result = await runImport({ store, registry, client, now, records });
+  await store.setMeta('changesCursor', cursor);
+  return { ...result, full: false, read: records.length };
+}
+
+/* Re-read `keys` from the String and take its new version (hlc, publishedUri,
+ * syndications) wherever only the String's bookkeeping moved — the case a
+ * publish or unpublish makes, which restamps the strand and every bead in it
+ * without changing a body. Without this a strand edited right after being
+ * published sends against the version it had before, and Send reports a
+ * conflict that is not one. A record whose body or state did change on the
+ * String is left for the next import to judge. */
+export async function restamp({ store, client, keys }) {
+  let n = 0;
+  for (const key of keys) {
+    const cur = await store.getRecord(key);
+    if (!cur?.stringId) continue;
+    let rec;
+    try { rec = await client.getRecord(cur.stringId); } catch { continue; }
+    const fresh = await store.getRecord(key);
+    if (!fresh || fresh.stringId !== rec.id || (await decide(rec, fresh)) !== 'unchanged') continue;
+    await store.putRecord({ ...fresh, ...stringFields(rec) });
+    n += 1;
+  }
+  return n;
 }

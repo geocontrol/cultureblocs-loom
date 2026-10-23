@@ -32,7 +32,7 @@ const connected = async (ctx) => Boolean(await ctx.store.getMeta('stringUrl'));
 export async function mountTopbar(root, ctx) {
   async function render() {
     const pending = (await pendingChanges(await ctx.store.allRecords())).size;
-    root.innerHTML = String(topbarView({ pending, connected: await connected(ctx), busy: ctx.desk.busy }));
+    root.innerHTML = String(topbarView({ pending, connected: await connected(ctx), busy: ctx.desk.busy, auto: await ctx.autoState?.() }));
   }
   const click = surfaceErrors(async (e) => {
     if (e.target.closest?.('button[data-action="send"]')) {
