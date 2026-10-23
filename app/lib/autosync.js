@@ -57,7 +57,8 @@ export function describeRun({ imported = null, sent = [] } = {}) {
 
 /* deps: {
  *   store,                 for settings and the last run
- *   run({ withImport }),   does the work; resolves to { imported, sent }
+ *   run({ withImport }),   does the work; resolves to { imported, sent }, or
+ *                          { skipped: reason } if something else got there first
  *   blocked(),             a reason not to run now, or null
  *   now(), timers: { set, clear }, lock(fn) — fn runs with the lock, or not at all
  *   onRun(last)            after every run, to refresh what shows it
@@ -66,6 +67,10 @@ export function createAutoSync({ store, run, blocked, now = () => Date.now(),
   timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (t) => clearTimeout(t) },
   lock = (fn) => fn(), onRun = () => {} }) {
   let tickTimer = null, saveTimer = null, running = false, stopped = false;
+  // Bumped by every schedule(): a tick that started under an older generation
+  // does not set a timer of its own, so a schedule() arriving mid-run (a
+  // settings change, coming back online) never leaves two timers live.
+  let generation = 0;
 
   async function attempt(withImport) {
     if (running) return 'running';
@@ -76,6 +81,7 @@ export function createAutoSync({ store, run, blocked, now = () => Date.now(),
     try {
       const did = await lock(() => run({ withImport }));
       if (did === undefined || did === null) return 'another tab is syncing';
+      if (did.skipped) return did.skipped;              // something else began writing first
       last = { at: new Date(now()).toISOString(), ok: true, withImport, summary: describeRun(did) };
     } catch (err) {
       last = { at: new Date(now()).toISOString(), ok: false, withImport, summary: err.message };
@@ -89,13 +95,21 @@ export function createAutoSync({ store, run, blocked, now = () => Date.now(),
 
   async function tick() {
     tickTimer = null;
+    const mine = generation;
     if (stopped) return;
-    const s = await readSyncSettings(store);
-    if (!s.autoSync) return;
-    const skipped = await attempt(true);
-    if (stopped) return;
-    // Skipped for something passing (a Send, an open edit): try again soon, not in N minutes.
-    tickTimer = timers.set(tick, skipped && skipped !== 'another tab is syncing' ? RETRY_MS : s.syncMinutes * 60_000);
+    let s = DEFAULTS, skipped = null;
+    try {
+      s = await readSyncSettings(store);
+      if (!s.autoSync) return;
+      skipped = await attempt(true);
+    } catch (err) {
+      skipped = err.message;                           // keep the loop alive; try again soon
+    } finally {
+      // Skipped for something passing (a Send, an open edit): try again soon, not in N minutes.
+      if (!stopped && mine === generation && s.autoSync !== false && !tickTimer) {
+        tickTimer = timers.set(tick, skipped && skipped !== 'another tab is syncing' ? RETRY_MS : s.syncMinutes * 60_000);
+      }
+    }
   }
 
   async function savedTick() {
@@ -108,6 +122,7 @@ export function createAutoSync({ store, run, blocked, now = () => Date.now(),
   return {
     /* (Re)read the settings and set the timer: at boot, and whenever they change. */
     async schedule({ soon = false } = {}) {
+      generation += 1;
       if (tickTimer) timers.clear(tickTimer);
       tickTimer = null;
       const s = await readSyncSettings(store);

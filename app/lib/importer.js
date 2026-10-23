@@ -221,6 +221,9 @@ async function feedEnd(client, since = 0) {
   const ids = new Set();
   for (;;) {
     const page = await client.changes(cursor);
+    // A cursor past the feed's end came from a String since rebuilt at the same
+    // address: nothing would ever arrive after it, so say so and start again.
+    if (Number.isInteger(page.latest) && cursor > page.latest) return { cursor, ids, reset: true };
     for (const c of page.changes) if (typeof c?.recordId === 'string') ids.add(c.recordId);
     if (!page.changes.length || page.cursor === cursor) break;
     cursor = page.cursor;
@@ -250,7 +253,11 @@ export async function importChanges({ store, registry, client, now = () => Date.
     await store.setMeta('changesCursor', cursor);
     return { ...result, full: true, read: null };
   }
-  const { cursor, ids } = await feedEnd(client, since);
+  const { cursor, ids, reset } = await feedEnd(client, since);
+  if (reset) {
+    await store.deleteMeta('changesCursor');
+    return importChanges({ store, registry, client, now });
+  }
   if (!ids.size) {
     await store.setMeta('changesCursor', cursor);
     return { counts: { add: 0, link: 0, update: 0, unchanged: 0, conflict: 0, invalid: 0, photos: 0, missing: 0 },

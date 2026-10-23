@@ -16,7 +16,8 @@ export async function sendAll(ctx) {
   ctx.desk.refresh?.();
   try {
     const client = stringClient(await ctx.store.getMeta('stringUrl'), await ctx.store.getMeta('stringToken'), ctx.fetch);
-    ctx.desk.results = await runSend({ store: ctx.store, client, now: ctx.now });
+    const send = () => runSend({ store: ctx.store, client, now: ctx.now });
+    ctx.desk.results = await (ctx.withLock ? ctx.withLock(send) : send());
   } catch (err) {
     ctx.desk.results = [{ key: '', status: 'failed', reason: err.message }];
   } finally {

@@ -50,7 +50,7 @@ export function fakeString({ records = [], media = {}, failMedia = new Set(), re
       reach('/changes');
       calls.push(`changes ${since}`);
       const page = feed.filter((c) => c.seq > since).slice(0, limit);
-      return { changes: structuredClone(page), cursor: page.length ? page.at(-1).seq : since };
+      return { changes: structuredClone(page), cursor: page.length ? page.at(-1).seq : since, latest: feed.length ? feed.at(-1).seq : 0 };
     },
     async importPds(identity) {
       reach('/import/pds');

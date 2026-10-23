@@ -38,6 +38,7 @@ const channel = 'BroadcastChannel' in self ? new BroadcastChannel('loom') : null
 const urls = new Map();
 const begin = routeSerializer();
 const NEW = { bead: BEAD, strand: STRAND };
+const SYNC_LOCK = 'loom-sync';
 let mounted = [];
 let dirty = false;
 
@@ -96,6 +97,10 @@ async function boot() {
      * The desk asks for a port and does not know what it is. */
     openPort: hasSerial() ? (opts) => openPort(opts) : null,
     setDirty: (d) => { dirty = d; },
+    /* Run `fn` holding the lock every writer to the String or the store takes
+     * — Send, import, pull, restore, auto-sync — so another tab's auto-sync
+     * never writes underneath it. Waits for the lock; auto-sync never does. */
+    withLock: (fn) => (navigator.locks ? navigator.locks.request(SYNC_LOCK, () => fn()) : fn()),
     /* A record was saved, kept or deleted here: auto-sync may want to send. */
     saved: () => ctx.sync?.saved(),
     /* Bring what changed on the String into this browser (the change feed). */
@@ -200,16 +205,20 @@ async function boot() {
     },
     // One tab syncs at a time; a tab that cannot take the lock skips this turn.
     lock: navigator.locks
-      ? (fn) => navigator.locks.request('loom-sync', { ifAvailable: true }, (held) => (held ? fn() : null))
+      ? (fn) => navigator.locks.request(SYNC_LOCK, { ifAvailable: true }, (held) => (held ? fn() : null))
       : (fn) => fn(),
     async run({ withImport }) {
+      // Checked again here, with no await before the flag is set: the lock may
+      // have taken a moment, and a Send or an import may have begun meanwhile.
+      if (ctx.desk.busy) return { skipped: 'something else is writing' };
       ctx.desk.busy = true;
       ctx.desk.refresh();
       try {
         const client = await ctx.client();
         const imported = withImport ? await importChanges({ store, registry, client, now: ctx.now }) : null;
         const sent = await runSend({ store, client, now: ctx.now, skip: ['delete'] });
-        if (sent.some((r) => r.status !== 'held')) ctx.desk.results = sent;
+        // The Send page shows a run's results only when one needs a person.
+        if (sent.some((r) => ['conflict', 'invalid', 'failed'].includes(r.status))) ctx.desk.results = sent;
         return { imported, sent };
       } finally {
         ctx.desk.busy = false;

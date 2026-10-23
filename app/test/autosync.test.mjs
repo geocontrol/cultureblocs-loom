@@ -219,3 +219,38 @@ test('a plain full import still works as before alongside the feed', async () =>
   const { counts } = await runImport({ store, registry: reg, client: s.client });
   assert.equal(counts.add, 1);
 });
+
+test('a schedule() arriving while a run is under way never leaves two timers', async () => {
+  const store = createMemStore();
+  const timers = fakeTimers();
+  let sync;
+  sync = createAutoSync({ store, timers, blocked: async () => null,
+    run: async () => { await sync.schedule(); return { sent: [] }; } });   // e.g. coming back online mid-run
+  await store.setMeta('autoSync', true);
+  await sync.schedule();
+  await timers.fire();
+  assert.equal(timers.pending.length, 1);
+});
+
+test('a run that finds the desk taken is skipped and retried soon', async () => {
+  const store = createMemStore();
+  const timers = fakeTimers();
+  const sync = createAutoSync({ store, timers, blocked: async () => null, run: async () => ({ skipped: 'something else is writing' }) });
+  await store.setMeta('autoSync', true);
+  await sync.schedule();
+  await timers.fire();
+  assert.equal(timers.pending[0].ms, RETRY_MS);
+  assert.equal(await store.getMeta('lastAutoSync'), undefined);
+});
+
+test('a cursor from a String since rebuilt at the same address starts a full import again', async () => {
+  const { store, reg, s } = await desk();
+  await store.setMeta('changesCursor', 500);
+  s.records.push({ id: 'u1', type: B, sourceApp: 'pocket', createdAt: '2026-10-01T10:00:00Z', state: 'kept',
+    body: { $type: B, createdAt: '2026-10-01T10:00:00Z', kind: 'bloc', note: 'one' } });
+  s.feed.push({ seq: 1, recordId: 'u1' });
+  const out = await importChanges({ store, registry: reg, client: s.client });
+  assert.equal(out.full, true);
+  assert.equal(out.counts.add, 1);
+  assert.equal(await store.getMeta('changesCursor'), 1);
+});

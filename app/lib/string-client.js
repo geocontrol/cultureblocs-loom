@@ -4,8 +4,8 @@
  * its status and its parsed body (`detail`), so send can tell a stale version
  * (412, with the String's current record) from invalid content (422). */
 
-export const LIST_LIMIT = 2000;
-export const CHANGES_PAGE = 2000;  // the most one GET /changes returns   // the most one GET /records returns (the String caps limit here)
+export const LIST_LIMIT = 2000;     // the most one GET /records returns (the String caps limit here)
+export const CHANGES_PAGE = 2000;   // the most one GET /changes returns
 
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isRecord = (b) => (isObject(b) && typeof b.id === 'string' && isObject(b.body)

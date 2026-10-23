@@ -44,7 +44,7 @@ export async function mountSettings(root, ctx) {
     s.busy = true;
     ctx.desk.busy = true;
     await render();
-    try { await fn(); } finally { s.busy = false; ctx.desk.busy = false; ctx.desk.refresh?.(); }
+    try { await (ctx.withLock ? ctx.withLock(fn) : fn()); } finally { s.busy = false; ctx.desk.busy = false; ctx.desk.refresh?.(); }
     return true;
   }
 
@@ -88,7 +88,9 @@ export async function mountSettings(root, ctx) {
       const { doc } = s.pendingRestore;   // an import or send still writing would land in the restored store: refused while busy
       s.pendingRestore = null;
       try {
-        await restoreBackup(ctx.store, doc);
+        // Under the lock, so another tab's auto-sync is not writing into the store being replaced.
+        const restore = () => restoreBackup(ctx.store, doc);
+        await (ctx.withLock ? ctx.withLock(restore) : restore());
       } catch (err) {
         // Checked before anything was cleared, so this is a write failing part way (e.g. a full disk).
         s.importResult = `restore failed part way: ${err.message} — this browser may hold only part of the backup; free some space and restore the same file again`;
