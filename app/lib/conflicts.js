@@ -14,7 +14,7 @@
  *                record is left in place, so nothing typed is lost. */
 import { contentHash } from '../vendor/strip.js';
 import { stringFields } from './importer.js';
-import { dayOf, same, toLoomItems } from './keys.js';
+import { dayOf, same, toLoomItems, whenOf } from './keys.js';
 import { hashFromName, mediaNames } from './media.js';
 
 const keyByStringId = async (store) =>
@@ -68,8 +68,9 @@ export async function takeTheirs(store, key, { registry = null, now = () => Date
     return null;
   }
   const body = toLoomItems(theirs.body, await keyByStringId(store));
-  const next = { ...rest, body, state: theirs.state || 'kept', updatedAt: new Date(now()).toISOString(),
-    day: dayOf(rest.type, body, rest.createdAt), stringHash: await contentHash(theirs.body),
+  const createdAt = whenOf(rest.type, body, rest.createdAt);
+  const next = { ...rest, body, createdAt, state: theirs.state || 'kept', updatedAt: new Date(now()).toISOString(),
+    day: dayOf(rest.type, body, createdAt), stringHash: await contentHash(theirs.body),
     importedHash: await contentHash(body), importedState: theirs.state || 'kept', ...stringFields(theirs) };
   const problems = registry ? registry.validateRecord(rest.type, theirs.body) : [];
   if (problems.length) next.invalid = problems;

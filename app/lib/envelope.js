@@ -10,7 +10,7 @@
  * (`draft:<key>` in meta, under a key reserved when its form opened). */
 import { anchorProblems } from '../vendor/refs.js';
 import { createClock } from './hlc.js';
-import { dayOf, itemUri, recordKey, same } from './keys.js';
+import { dayOf, itemUri, recordKey, same, whenOf } from './keys.js';
 import { mediaNames } from './media.js';
 import { tidGenerator } from './tid.js';
 
@@ -113,10 +113,12 @@ export async function openLoom({ store, registry, now = () => Date.now(), newDev
     // String's last refusal no longer apply; `missing` keeps only photos the new body still uses.
     const { invalid: _i, problems: _p, missing = [], ...rest } = current;
     const keeps = current.state === 'proposal' || (current.state === 'draft' && !current.stringId);
+    // A corrected time moves the record: its envelope time and day follow the body.
+    const createdAt = whenOf(current.type, body, current.createdAt);
     const env = {
-      ...rest, body, updatedAt: iso(), hlc: await stamp(), deviceId,
+      ...rest, body, createdAt, updatedAt: iso(), hlc: await stamp(), deviceId,
       state: keeps ? 'kept' : current.state,
-      day: dayOf(current.type, body, current.createdAt),
+      day: dayOf(current.type, body, createdAt),
     };
     const used = new Set(mediaNames(body));
     const still = (Array.isArray(missing) ? missing : []).filter((n) => used.has(n));

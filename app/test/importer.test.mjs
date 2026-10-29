@@ -349,3 +349,13 @@ test('import carries where a strand was posted, so the desk can link to it', asy
   assert.deepEqual((await store.getRecord(`${B}/u2`)).syndications, [],
     'a String that says "none" reads as none, not as unknown');
 });
+
+test('import files a bead by its body’s time when the String still holds the first time it was given', async () => {
+  const s = fakeString({ records: [bead('u9', 'Autechre', { createdAt: '2026-10-26T20:00:00Z',
+    body: { $type: B, createdAt: '2026-10-24T20:00:00Z', kind: 'bloc', note: 'Autechre' } })] });
+  const store = createMemStore();
+  await runImport({ store, registry: await registry(), client: s.client, now: () => 1 });
+  const r = await store.getRecord(`${B}/u9`);
+  assert.equal(r.createdAt, '2026-10-24T20:00:00Z');
+  assert.equal(r.day, '2026-10-24');
+});

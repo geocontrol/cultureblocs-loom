@@ -22,7 +22,7 @@
  * Every write re-reads the local record first: the network awaits in between
  * give another tab time to save, and a stale snapshot must never undo that. */
 import { contentHash } from '../vendor/strip.js';
-import { dayOf, idFromSpineUri, recordKey, same, toLoomItems } from './keys.js';
+import { dayOf, idFromSpineUri, recordKey, same, toLoomItems, whenOf } from './keys.js';
 import { hashFromName, mediaNames } from './media.js';
 
 const STRAND = 'com.cultureblocs.strand';
@@ -137,11 +137,13 @@ export async function runImport({ store, registry, client, now = () => Date.now(
     }
 
     const problems = registry.validateRecord(rec.type, rec.body);
+    // The body's time wins: a String older than the PATCH fix keeps the first time it was given.
+    const createdAt = whenOf(rec.type, body, rec.createdAt);
     const env = {
       key, type: rec.type, rkey: local?.rkey ?? rec.id,
       body, state: rec.state || 'kept', origin: local?.origin ?? 'import', sourceApp: rec.sourceApp,
-      createdAt: rec.createdAt, updatedAt: iso(), hlc: rec.hlc ?? null, deviceId: 'string',
-      day: dayOf(rec.type, body, rec.createdAt), stringId: rec.id,
+      createdAt, updatedAt: iso(), hlc: rec.hlc ?? null, deviceId: 'string',
+      day: dayOf(rec.type, body, createdAt), stringId: rec.id,
       stringHash: await contentHash(rec.body), importedHash: await contentHash(body),
       importedState: rec.state || 'kept', ...stringFields(rec),
     };

@@ -23,3 +23,19 @@ test('migrateStore is idempotent and removes the retired settings', async () => 
   assert.equal((await store.getRecord(`${B}/a`)).deleted, true);
   assert.deepEqual(await store.allMeta(), { deviceId: 'desk-1' });
 });
+
+test('migrateRecord moves a bead saved on the wrong day to its body’s time, and is then a no-op', () => {
+  const wrong = rec(`${B}/c`, 'kept', { createdAt: '2026-10-26T20:00:00Z', day: '2026-10-26',
+    body: { $type: B, kind: 'performance', createdAt: '2026-10-24T20:00:00Z' } });
+  const fixed = migrateRecord(wrong);
+  assert.equal(fixed.createdAt, '2026-10-24T20:00:00Z');
+  assert.equal(fixed.day, '2026-10-24');
+  assert.equal(migrateRecord(fixed), null);
+});
+
+test('migrateRecord leaves a strand’s time and day alone when they already agree with its day', () => {
+  const S = 'com.cultureblocs.strand';
+  const s = { key: `${S}/s`, type: S, state: 'kept', createdAt: '2026-09-15T08:00:00Z', day: '2026-09-14',
+    body: { $type: S, createdAt: '2026-10-29T09:00:00Z', day: '2026-09-14T00:00:00Z', items: [] } };
+  assert.equal(migrateRecord(s), null);
+});

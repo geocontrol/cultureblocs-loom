@@ -295,3 +295,23 @@ test('adoptBead ignores any option it does not name', async () => {
   assert.equal(env.dedupeKey, 'cb:x');
   assert.equal(env.state, 'proposal');
 });
+
+test('correcting a bead’s time moves it to the new day: envelope time and day follow the body', async () => {
+  const { store, loom: l } = await loom();
+  // Logged on the Monday by mistake; the gig was the Saturday before.
+  const b = await bead(l, { kind: 'performance', createdAt: '2026-10-26T20:00:00Z', note: 'Autechre' });
+  assert.equal(b.day, '2026-10-26');
+  const saved = await l.save(b.key, { ...b.body, createdAt: '2026-10-24T20:00:00Z' }, { expectUpdatedAt: b.updatedAt });
+  assert.equal(saved.createdAt, '2026-10-24T20:00:00Z');
+  assert.equal(saved.day, '2026-10-24');
+  assert.deepEqual(await store.recordsByDay('2026-10-26'), []);
+  assert.deepEqual((await store.recordsByDay('2026-10-24')).map((r) => r.key), [b.key]);
+});
+
+test('saving a strand keeps its first-made time and files it by its day, not the save', async () => {
+  const { loom: l } = await loom();
+  const s = await strand(l, []);
+  const saved = await l.save(s.key, { ...s.body, title: 'retitled', createdAt: '2026-10-29T09:00:00Z' });
+  assert.equal(saved.createdAt, s.createdAt);
+  assert.equal(saved.day, '2026-09-14');
+});

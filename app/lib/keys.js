@@ -38,3 +38,12 @@ export function dayOf(type, body, createdAt) {
   const src = type === 'com.cultureblocs.strand' && typeof body?.day === 'string' ? body.day : createdAt;
   return typeof src === 'string' ? src.slice(0, 10) : null;
 }
+
+/* When a record happened, for its envelope: a bead's or annotation's body says
+ * (and the person can correct it), so the envelope follows the body. A strand's
+ * body `createdAt` is restamped on every save, so a strand keeps the envelope's
+ * own `createdAt` — the moment it was first made — and files by its `day`. */
+export function whenOf(type, body, envelopeCreatedAt) {
+  if (type === 'com.cultureblocs.strand') return envelopeCreatedAt;
+  return typeof body?.createdAt === 'string' && body.createdAt ? body.createdAt : envelopeCreatedAt;
+}
